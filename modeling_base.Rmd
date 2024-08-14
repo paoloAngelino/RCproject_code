@@ -1,0 +1,221 @@
+---
+title: "glmnet and randomForest"
+author: "Paolo Angelino"
+output:
+  html_document:
+    depth: 2
+    highlight: tango
+    number_sections: yes
+    toc: yes
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+if (!require("tidyverse", quietly = TRUE))
+    install.packages("tidyverse")
+
+if (!require("caret", quietly = TRUE))
+    BiocManager::install("caret")
+
+if (!require("caTools", quietly = TRUE))
+    BiocManager::install("caTools")
+
+# load libraries
+library(tidyverse)
+library(caret)
+library(caTools)
+library(SingleCellExperiment)
+```
+
+https://www.kaggle.com/code/petrschonbauer/glmnet-and-randomforest-in-r-caret/script
+
+# Data wrangling
+
+## Load data, remove redundat variables
+
+```{r, message=FALSE, warning=FALSE}
+# load data
+spe <- readRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/data/GEO_singlecellexperiment.rds")
+```
+
+## Summary of data
+
+```{r}
+# propotion in response
+table(colData(spe)$Response)
+prop.table(table(colData(spe)$Response))
+
+# are there any missing values?
+any(is.na(colData(spe)$Response))
+```
+
+## filter samples
+
+Keep samples for the 4 datasets for which we have TRG
+
+```{r}
+spe <- spe[, spe$batch %in% c("GSE150082", "GSE94104", "GSE133057", "GSE93375")]
+spe <- spe[, spe$Response %in% c("yes","no")]
+dim(spe)
+```
+
+## filter features
+
+Keep only significant genes from meta-analysis 
+
+```{r}
+CRT.extrR.markers <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/CRT.extrR.markers.rds")
+spe <- spe[intersect(CRT.extrR.markers$Symbol,rownames(spe)),]
+#keep <- c(grep("XRCC",rownames(spe)),grep("RAD",rownames(spe)))
+#spe <- spe[keep,]
+
+dim(spe)
+```
+
+# Models
+
+## Create common validation indicies, `trainControl`
+
+Start with dividing predictors (features) and response (class) into separated variables `df_x` and `df_y`.
+
+```{r}
+# subset predictors variables
+df_x <- t(assay(spe,2))
+
+# subset response variable
+df_y <- spe$Response
+
+# convert diagnosis as factor
+df_y <- as.factor(df_y)
+```
+
+In order to achieve fair comparison of models we have to train and test models on the same train/test splits. `createFolds` seems to be covinient way how to achieve such splits. The outcome (indices) are used later as an `index` parameter of common `trainControl` object for all tested models.
+
+```{r}
+# create indices for each fold
+set.seed(1111)
+my_folds <- createFolds(df_y, k = 5)
+```
+
+`my_folds` now contains indices of held-out (validation) samples of each fold. In addition distribution of class (benign / malignant) is preserved.
+
+```{r}
+# structure of "my_fold"
+my_folds %>% glimpse
+# distribution of class is preserved in each fold
+my_folds %>% 
+  map_df(~prop.table(table(df_y[.])))
+```
+
+```{r}
+# create trainControl object
+my_trainControl <- trainControl(
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE,
+  verboseIter = FALSE,
+  savePredictions = TRUE,
+  index = my_folds)
+```
+
+## glmnet model
+
+```{r, message=FALSE, warning=FALSE}
+# train glmnet model
+set.seed(9999)
+model_glmnet <- train(x = df_x, y = df_y, 
+                   method = "glmnet",
+                   metric = "ROC",
+                   tuneLength = 20,
+                   trControl = my_trainControl, 
+                   family = "binomial"
+)
+
+# print model
+model_glmnet
+```
+
+Some remarks:
+
+*  ROC = area under curve
+*  Sens = sensitivity = true positive rate = proportion of positives that are correctly identified as such
+*  Spec = specificity = true negative rate = proportion of negatives that are correctly identified as such
+
+Another approach to find the model with the highest ROC:
+
+```{r}
+model_glmnet$results %>% 
+  as_tibble %>%  
+  arrange(desc(ROC))
+```
+
+```{r}
+# plot ROCs
+plot(model_glmnet)
+```
+
+```{r}
+library(plotROC)
+# Select a parameter setting
+selectedIndices <- model_glmnet$pred$alpha == model_glmnet$bestTune$alpha & model_glmnet$pred$lambda == model_glmnet$bestTune$lambda
+
+g <- ggplot(model_glmnet$pred[selectedIndices, ], aes(m=yes, d=factor(obs, levels = c("no", "yes")))) + 
+  geom_roc(n.cuts=0) + 
+  coord_equal() +
+  style_roc()
+
+g + annotate("text", x=0.75, y=0.25, label=paste("AUC =", round((calc_auc(g))$AUC, 4)))
+```
+
+
+## randomForest model
+
+```{r, message=FALSE, warning=FALSE}
+# train randomForest model
+model_randomForest <- train(x = df_x, y = df_y, 
+                            method = "ranger",
+                            metric = "ROC",
+                            importance = "permutation",
+                            tuneLength = 20,
+                            trControl = my_trainControl)
+
+# print model
+model_randomForest
+
+# plot model
+plot(model_randomForest)
+```
+
+```{r}
+model_randomForest$results %>% 
+  as_tibble %>%  
+  arrange(desc(ROC))
+```
+
+Now we can compare top 10 importance variables:
+
+```{r}
+plot(varImp(model_glmnet, scale = FALSE), top = 10, main = "glmnet")
+plot(varImp(model_randomForest, scale = FALSE), top = 10, main = "randomForest")
+```
+
+Variables quite differs.
+
+## Compare glmnet and randomForest performance
+
+```{r}
+model_list <- list(glmnet = model_glmnet, randomForest = model_randomForest)
+resamples <- resamples(model_list)
+
+# plot the comparison
+bwplot(resamples, metric = "ROC")
+# plot the comparison per each fold
+xyplot(resamples, metric = "ROC")
+```
+
+# Conclusion
+
+*  both models lead to low ROC values
+*  open points: difference between variable importance of both models
+

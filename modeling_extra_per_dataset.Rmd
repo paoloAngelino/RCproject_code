@@ -1,0 +1,278 @@
+---
+title: "`r paste0('glmnet and randomForest in R (caret), ', params$title)`"
+author: "Paolo Angelino"
+output:
+  html_document:
+    depth: 2
+    highlight: tango
+    number_sections: yes
+    toc: yes
+params:
+  usescaled: TRUE
+  seed: 26326
+  gene.list:  "de_intersect_plus_bulk_genes"  # "de_intersect" DE4" "DEall" "meta_intersect_unionDE"  "5k" "meta"
+  title: "DE intersect plus bulk genes, scaled data"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+if (!require("tidyverse", quietly = TRUE))
+    install.packages("tidyverse")
+
+if (!require("caret", quietly = TRUE))
+    BiocManager::install("caret")
+
+if (!require("caTools", quietly = TRUE))
+    BiocManager::install("caTools")
+
+# load libraries
+library(tidyverse)
+library(caret)
+library(caTools)
+library(SingleCellExperiment)
+print(params)
+```
+
+**Motivation:**
+
+Hello together. Purpose of this kernel is to share and learn basics of modeling, sort of a simple "cookbook" how to apply several type of models on the same train/test splits, evaluate and compare its performance. Any kind of feedback or proposals for improvements are welcomed.
+https://www.kaggle.com/code/petrschonbauer/glmnet-and-randomforest-in-r-caret/script
+
+# Data wrangling
+
+## Load data, remove redundat variables
+```{r, message=FALSE, warning=FALSE}
+# load data
+spe <- readRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/data/GEO_singlecellexperiment.rds")
+```
+
+## Summary of data
+
+```{r}
+# propotion in response
+table(colData(spe)$Response)
+prop.table(table(colData(spe)$Response))
+
+# are there any missing values?
+any(is.na(colData(spe)$Response))
+```
+
+```{r}
+if (params$usescaled) {
+  assay_to_use <- 3
+  assayname_to_use <- "scalelogcounts"
+} else {
+  assay_to_use <- 2
+  assayname_to_use <- "logcounts"
+}
+```
+
+## filter samples
+
+```{r}
+table(spe$batch)
+```
+
+```{r}
+#spe <- spe[, !(spe$batch %in% c("GSE190826", "GSE209746","GSE45404_GPL2"))]
+spe <- spe[, spe$Response %in% c("yes","no")]
+dim(spe)
+```
+
+## filter features
+
+
+```{r}
+keep <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds")
+spe <- spe[keep[[params$gene.list]],]
+dim(spe)
+```
+
+
+# Models
+
+
+```{r}
+get_model <- function(spe, folds = 5, assay_to_use=3, seed=1111){
+  
+  # subset predictors variables
+  df_x <- t(assay(spe,assay_to_use))
+  
+  # subset response variable
+  df_y <- spe$Response
+  
+  # convert diagnosis as factor
+  df_y <- as.factor(df_y)
+  
+  print(table(df_y))
+
+  if(folds == 1){
+    my_trainControl <- trainControl(
+      summaryFunction = twoClassSummary,
+      classProbs = TRUE,
+      verboseIter = FALSE,
+      savePredictions = TRUE)
+  } else {
+    # create indices for each fold
+    set.seed(seed)
+    my_folds <- createFolds(df_y, k = folds)
+    
+    # structure of "my_fold"
+    my_folds %>% glimpse
+    # distribution of class is preserved in each fold
+    my_folds %>% 
+      map_df(~prop.table(table(df_y[.])))
+    
+    # create trainControl object
+    my_trainControl <- trainControl(
+      summaryFunction = twoClassSummary,
+      classProbs = TRUE,
+      verboseIter = FALSE,
+      savePredictions = TRUE,
+      index = my_folds)
+  }
+  
+  # train glmnet model
+  model_glmnet <- train(x = df_x, y = df_y, 
+                        method = "glmnet",
+                        metric = "ROC",
+                        tuneLength = 20,
+                        trControl = my_trainControl, 
+                        family = "binomial"
+  )
+  
+  # print model
+  model_glmnet
+  
+  model_glmnet$results %>% 
+    as_tibble %>%  
+    arrange(desc(ROC))
+  
+  # plot ROCs
+  plot(model_glmnet)
+  
+  # train randomForest model
+  model_randomForest <- train(x = df_x, y = df_y, 
+                              method = "ranger",
+                              metric = "ROC",
+                              importance = "permutation",
+                              tuneLength = 20,
+                              trControl = my_trainControl)
+  
+  # print model
+  model_randomForest
+  
+  # plot model
+  plot(model_randomForest)
+  
+  model_randomForest$results %>% 
+    as_tibble %>%  
+    arrange(desc(ROC))
+
+  return(list(gl = model_glmnet, rf = model_randomForest))
+}
+```
+
+
+```{r}
+model_plots <- function(mymodel){
+  library(plotROC)
+  # Select a parameter setting
+  
+  selectedIndices <- !logical(length = nrow(mymodel$pred))
+  for (n in names(mymodel$bestTune)) {
+    print(mymodel$bestTune[[n]])
+    if(is.factor(mymodel$bestTune[[n]])) mymodel$bestTune[[n]] <- as.character(mymodel$bestTune[[n]])
+    selectedIndices <- selectedIndices & mymodel$pred[n] == mymodel$bestTune[[n]]
+  }
+  
+  g <- ggplot(mymodel$pred[selectedIndices, ], aes(m=yes, d=factor(obs, levels = c("no", "yes")))) + 
+    geom_roc(n.cuts=0) + 
+    coord_equal() +
+    style_roc()
+  
+  print(g + annotate("text", x=0.75, y=0.25, label=paste("AUC =", round((calc_auc(g))$AUC, 4))))
+  
+  print(plot(varImp(mymodel, scale = FALSE), top = 10, main = mymodel$modelInfo$label))
+}
+```
+
+
+```{r}
+predict.one <- function(mymodel, spe, assay_to_use = 3){
+  test_res <- predict(mymodel, newdata =  t(assay(spe,assay_to_use)), type="prob")
+  test_res$obs <- spe$Response
+
+  g <- ggplot(test_res, aes(m=yes, d=factor(obs, levels = c("no", "yes")))) + 
+    geom_roc(n.cuts=0) + 
+    coord_equal() +
+    style_roc()
+  
+  print(g + annotate("text", x=0.75, y=0.25, label=paste("AUC =", round((calc_auc(g))$AUC, 4))))
+  
+  return(round((calc_auc(g))$AUC, 4))
+}
+```
+
+
+# Loop over batches
+
+```{r}
+batch.list <- unique(spe$batch)
+
+spe.batch <- lapply(batch.list, function(x) {spe[,which(spe$batch %in% x)]})
+
+auc.mat.gl <- matrix(nrow = length(batch.list), ncol = length(batch.list), dimnames = list(batch.list, batch.list))
+auc.mat.rf <- matrix(nrow = length(batch.list), ncol = length(batch.list), dimnames = list(batch.list, batch.list))
+
+i=1
+for (n in spe.batch) {
+  res <- get_model(n, folds = 3, assay_to_use = assay_to_use, seed = params$seed)
+  model_plots(res$gl)
+  model_plots(res$rf)
+  resamples <- resamples(res)
+  # plot the comparison
+  bwplot(resamples, metric = "ROC")
+  # plot the comparison per each fold
+  xyplot(resamples, metric = "ROC")
+  auc.mat.gl[i,] <- sapply(spe.batch, function(x) predict.one(res$gl, x, assay_to_use = assay_to_use ))
+  auc.mat.rf[i,] <- sapply(spe.batch, function(x) predict.one(res$rf, x, assay_to_use = assay_to_use ))
+  i=i+1
+}
+
+
+
+```
+
+# AUC matrix, Random Forrest
+
+```{r}
+print(auc.mat.rf)
+```
+```{r, fig.height=9, fig.width=10}
+require(plot.matrix)
+par(mar=c(8.1, 8.1, 4.1, 4.1)) # adapt margins such that all labels are visible
+
+plot(auc.mat.rf, digits=3, text.cell=list(cex=1),axis.col=list(side=1, las=2), axis.row = list(side=2, las=1),
+     xlab = "", # Also NA or NULL
+     ylab = "")
+```
+
+
+# AUC matrix, GLMnet
+
+```{r}
+print(auc.mat.gl)
+```
+
+```{r, fig.height=9, fig.width=10}
+require(plot.matrix)
+par(mar=c(8.1, 8.1, 4.1, 4.1)) # adapt margins such that all labels are visible
+
+plot(auc.mat.gl, digits=3, text.cell=list(cex=1),axis.col=list(side=1, las=2), axis.row = list(side=2, las=1),
+     xlab = "", # Also NA or NULL
+     ylab = "")
+```

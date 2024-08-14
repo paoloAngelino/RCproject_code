@@ -1,0 +1,97 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+CRT.extrR.markers <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/CRT.extrR.markers.rds")
+DE_4datasets_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_4datasets_scaled.rds")
+DE_alldatasets_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_alldatasets_scaled.rds")
+DE_bulkDatasets_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_bulkDatasets_scaled.rds")
+```
+
+
+```{r}
+head(CRT.extrR.markers)
+```
+
+```{r}
+DE_4datasets_scaled <- DE_4datasets_scaled[[1]]
+DE_alldatasets_scaled <- DE_alldatasets_scaled[[1]]
+DE_bulkDatasets_scaled <- DE_bulkDatasets_scaled[[1]]
+```
+
+```{r}
+DE_4datasets_scaled <- DE_4datasets_scaled %>% filter(P.Value <= 0.05)
+DE_alldatasets_scaled <- DE_alldatasets_scaled %>% filter(P.Value <= 0.05)
+DE_bulkDatasets_scaled <- DE_bulkDatasets_scaled %>% filter(P.Value <= 0.05)
+```
+
+```{r}
+length(intersect(CRT.extrR.markers$Symbol, rownames(DE_4datasets_scaled)))
+length(intersect(CRT.extrR.markers$Symbol, rownames(DE_alldatasets_scaled)))
+length(intersect(rownames(DE_4datasets_scaled), rownames(DE_alldatasets_scaled)))
+```
+
+```{r}
+ggvenn::ggvenn(list(meta=CRT.extrR.markers$Symbol, DE4=rownames(DE_4datasets_scaled),DEall=rownames(DE_alldatasets_scaled)), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+ggvenn::ggvenn(list(DEbulk=rownames(DE_bulkDatasets_scaled), DE4=rownames(DE_4datasets_scaled),DEall=rownames(DE_alldatasets_scaled)), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+de_intersect_plus_bulk_genes <- intersect(union(rownames(DE_bulkDatasets_scaled),rownames(DE_4datasets_scaled)),rownames(DE_alldatasets_scaled))
+length(de_intersect_plus_bulk_genes)
+```
+
+
+```{r}
+meta_intersect_unionDE <- intersect(CRT.extrR.markers$Symbol, unique(c(rownames(DE_4datasets_scaled), rownames(DE_alldatasets_scaled))))
+de_intersect_genes <- intersect(rownames(DE_4datasets_scaled), rownames(DE_alldatasets_scaled))
+```
+
+```{r}
+saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/meta_intersect_unionDE.rds", meta_intersect_unionDE)
+saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/de_intersect_genes.rds", de_intersect_genes)
+saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/de_intersect_plus_bulk_genes.rds", de_intersect_plus_bulk_genes)
+```
+
+```{r}
+spe <- readRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/data/GEO_singlecellexperiment.rds")
+keep <- list()
+
+CRT.extrR.markers <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/CRT.extrR.markers.rds")
+keep[["meta"]] <- intersect(CRT.extrR.markers$Symbol,rownames(spe))
+
+DE_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_4datasets_scaled.rds")
+DE_scaled <- DE_scaled[[1]]
+DE_scaled <- DE_scaled %>% filter(P.Value <= 0.05)
+keep[["DE4"]] = rownames(DE_scaled)
+
+DE_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_alldatasets_scaled.rds")
+DE_scaled <- DE_scaled[[1]]
+DE_scaled <- DE_scaled %>% filter(P.Value <= 0.05)
+keep[["DEall"]] = rownames(DE_scaled)
+
+keep[["meta_intersect_unionDE"]] = readRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/meta_intersect_unionDE.rds")
+
+keep[["de_intersect"]] = readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/de_intersect_genes.rds")
+
+keep[["de_intersect_plus_bulk_genes"]] = readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/de_intersect_plus_bulk_genes.rds") 
+
+keep[["5k"]] <- names(sort(rowVars(assay(spe,3)), decreasing = T)[1:5000])
+```
+
+```{r}
+saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds", keep)
+```
+
+

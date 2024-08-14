@@ -1,0 +1,554 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r setup, include=FALSE}
+#set knitr chunk options
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+#load packages to avoid startup messages later in the code
+library(standR)
+library(SpatialExperiment)
+library(limma)
+library(edgeR)
+library(tidyverse)
+library(vissE)
+library(GSEABase)
+library(msigdb)
+library(ggalluvial)
+
+#automatically create a bib database for R packages
+#knitr::write_bib(c(
+#  .packages(), 'knitr', 'rmarkdown', 'prettydoc'
+#), 'packages.bib')
+```
+
+```{r}
+library(readxl)
+
+Raw_data_Discovery_Cohorte <- read_excel("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/Raw data Discovery Cohorte.xlsx")
+
+Raw_data_Validation_Cohorte <- read_excel("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/Raw data Validation Cohorte.xlsx")
+```
+
+
+
+```{r}
+discovery <- read_excel("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/Annotation template file_Discovery.xlsx")
+validation <- read_excel("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/Annotation template file_Validation.xlsx")
+```
+
+```{r}
+Prot_Discovery <- read_excel("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/Protein Initial Dataset Discovery.xlsx", sheet = "SamplesAnno")
+Prot_Validation <- read_excel("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/Protein Initial Dataset Validation Cohorte.xlsx", sheet = "SampleAnno")
+```
+
+```{r}
+Prot_Discovery_data <- read_excel("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/Protein Initial Dataset Discovery.xlsx", sheet = "Proteins")
+Prot_Validation_data <- read_excel("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/Protein Initial Dataset Validation Cohorte.xlsx", sheet = "Proteins")
+```
+
+
+## Discovery
+
+```{r}
+discovery$Segment_ID <- paste0(substr(discovery$`scan name`, 1,4), " | ", discovery$`ROI (label)`, " | ", discovery$`Segment (Name/ Label)`)
+head(discovery)
+```
+
+
+```{r}
+Prot_Discovery$Segment_ID <- paste0(substr(Prot_Discovery$`Custom Segment Name`, 1,4), " | ", Prot_Discovery$`ROI (Label)`, " | ", Prot_Discovery$`Segment (Name/ Label)`)
+head(Prot_Discovery)
+```
+
+```{r}
+dim(Prot_Discovery)
+dim(discovery)
+
+table(Prot_Discovery$`Scan Name`)
+table(discovery$`slide name`)
+```
+
+```{r}
+length(intersect(Prot_Discovery$Segment_ID, discovery$Segment_ID))
+```
+
+
+```{r}
+setdiff(Prot_Discovery$Segment_ID, discovery$Segment_ID)
+```
+```{r}
+setdiff(discovery$Segment_ID, Prot_Discovery$Segment_ID)
+```
+
+
+## Validation
+
+```{r}
+head(validation)
+```
+
+```{r}
+table(validation$`slide name`)
+```
+
+```{r}
+table(Prot_Validation$`Scan Name`)
+```
+
+# Merge metadata
+
+```{r}
+head(Prot_Discovery)
+```
+
+```{r}
+head(Prot_Validation)
+```
+
+Merge validation annotations
+```{r}
+validation$Segment_ID <- paste0(substr(validation$`scan name`, 9,12), " | ", validation$`ROI (Label)`, " | ", validation$`Segment (Name/ Label)`)
+head(validation)
+
+Prot_Validation$Segment_ID <- paste0(substr(Prot_Validation$`Custom Segment Name`, 9,12), " | ", Prot_Validation$`ROI (Label)`, " | ", Prot_Validation$`Segment (Name/ Label)`)
+head(Prot_Validation)
+```
+
+```{r}
+length(common.segments <- intersect(validation$Segment_ID , Prot_Validation$Segment_ID))
+nrow(validation)
+nrow(Prot_Validation)
+```
+```{r}
+validation <- validation[validation$Segment_ID %in% common.segments,]
+Prot_Validation <- Prot_Validation[Prot_Validation$Segment_ID %in% common.segments,]
+validation_anno <- merge(Prot_Validation, validation, by = c("Segment_ID", "Segment (Name/ Label)"))
+```
+
+```{r}
+head(validation_anno)
+```
+```{r}
+Prot_Discovery$`scan name` <- Prot_Discovery$`Scan Name`
+print(common_meta <- intersect(colnames(validation_anno), colnames(Prot_Discovery)))
+```
+```{r}
+full_anno <- rbind(Prot_Discovery[,common_meta],validation_anno[,common_meta])
+full_anno$segment <- full_anno$`Segment (Name/ Label)`
+dim(full_anno)
+```
+
+```{r}
+table(full_anno$Type)
+```
+
+```{r}
+table(full_anno$segment)
+```
+
+# Merge data
+
+```{r}
+length(c(colnames(Prot_Discovery_data), colnames(Prot_Validation_data)))
+length(intersect(c(colnames(Prot_Discovery_data), colnames(Prot_Validation_data)), full_anno$`Custom Segment Name`))
+```
+
+```{r}
+length(Prot_Discovery_data$`Target name (display name)`)
+length(Prot_Validation_data$`Target name (display name)`)
+length(intersect(Prot_Discovery_data$`Target name (display name)`,
+                 Prot_Validation_data$`Target name (display name)`
+                 ))
+```
+
+```{r}
+head(Prot_Discovery_data)
+```
+
+```{r}
+head(Prot_Validation_data)
+```
+
+```{r}
+target_meta <- Prot_Validation_data[,1:4]
+target_meta$TargetName <- target_meta$`Target name (display name)`
+target_meta$Protein <- target_meta$`Target name (display name)`
+```
+
+```{r}
+head(colnames(Prot_Discovery_data))
+```
+
+```{r}
+full_data <- merge(Prot_Discovery_data, Prot_Validation_data, by = c("Target name (display name)"))
+dim(full_data)
+```
+
+```{r}
+full_data <- full_data[,-which(colnames(full_data) %in% c("#Target Group.y","#Analyte type.y","#CodeClass.y" ))]
+colnames(full_data) <- sub("\\.x", "", colnames(full_data))
+```
+
+
+```{r}
+head(colnames(full_data))
+TargetName <- full_data$`Target name (display name)`
+full_data <- full_data[,-c(1,2,3,4)]
+dim(full_data)
+```
+
+```{r}
+segments.all <- intersect(full_anno$`Custom Segment Name`, colnames(full_data))
+full_data <- full_data[,segments.all]
+full_anno <- full_anno[full_anno$`Custom Segment Name` %in% segments.all,]
+full_data$TargetName <- TargetName
+```
+
+```{r}
+full_anno[c(1,1) * which(duplicated(full_anno$`Custom Segment Name`)) - c(1,0),]
+```
+
+```{r}
+full_anno <- full_anno[!duplicated(full_anno$`Custom Segment Name`),]
+```
+
+
+```{r}
+dim(full_data)
+dim(full_anno)
+dim(target_meta)
+```
+
+add necessary columns
+```{r}
+full_anno$SegmentDisplayName <- full_anno$`Custom Segment Name`
+full_anno$ROICoordinateX <- 0
+full_anno$ROICoordinateY <- 0
+full_anno$SlideName <- full_anno$`scan name` # Make a canonical slide name
+full_anno$segment <- sub("CK\\+", "tumor",full_anno$segment)
+full_anno$segment <- sub("CK\\-", "stroma",full_anno$segment)
+full_anno$Type <- sub("Biopsy 1", "Biopsy", full_anno$Type)
+full_anno$Type <- sub("Surgery$", "Surgery TC", full_anno$Type)
+table(full_anno$Type)
+table(full_anno$segment)
+```
+
+```{r}
+full_anno <- as.data.frame(full_anno)
+rownames(full_anno) <- full_anno$SegmentDisplayName
+length(intersect(colnames(full_data), rownames(full_anno)))
+```
+Create a negative probe
+```{r}
+target_meta <- rbind(target_meta, target_meta[8, ] )
+target_meta[80,"TargetName"] <-  "NegProbe-WTX"
+
+full_data <- rbind(full_data, full_data[8, ] )
+full_data[80,"TargetName"] <-  "NegProbe-WTX"
+```
+
+
+
+```{r}
+dim(full_data)
+dim(full_anno)
+dim(target_meta)
+```
+
+```{r}
+rownames(full_data) <- full_data$TargetName
+```
+
+
+# Build a spe object
+
+
+```{r message=FALSE}
+library(standR)
+
+spe <- readGeoMx(as.data.frame(full_data), as.data.frame(full_anno), as.data.frame(target_meta))
+```
+
+
+```{r}
+spe
+```
+
+filter segments
+```{r}
+spe <- spe[,which(spe$segment %in% c("stroma", "tumor"))]
+```
+
+```{r}
+saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/data/GEOMX_protein.rds", spe)
+```
+
+
+```{r}
+head(assay(spe,1))
+head(assay(spe,2))
+```
+
+### Relative log expression distribution
+
+
+```{r fig.width=10, fig.height=5}
+plotRLExpr(spe)
+```
+
+```{r fig.width=10, fig.height=5}
+plotRLExpr(spe, ordannots = "SlideName", assay = 2, color = SlideName)
+```
+
+### PCA
+
+```{r}
+set.seed(100)
+
+spe <- scater::runPCA(spe)
+
+pca_results <- reducedDim(spe, "PCA")
+```
+
+
+```{r fig.height=8, fig.width=10}
+drawPCA(spe, precomputed = pca_results, col = Type)
+```
+
+```{r fig.height=8, fig.width=10}
+plotPairPCA(spe, assay = 2, color = Type,
+            shape = segment, title = "PCA")
+```
+
+
+```{r fig.height=8, fig.width=10}
+plotPairPCA(spe, assay = 2, color = SlideName,
+            shape = segment, title = "PCA")
+```
+
+
+
+```{r fig.height=8, fig.width=10}
+drawPCA(spe, precomputed = pca_results, col = segment)
+```
+
+
+
+### UMAP
+
+```{r}
+set.seed(100)
+
+spe_lrb <- scater::runUMAP(spe, dimred = "PCA", assay.type = 2)
+
+plotDR(spe[,which(spe$Type %in% c("Biopsy", "Surgery TC"))], dimred = "UMAP", col = Type, shape = segment)
+
+plotDR(spe[,which(spe$Type %in% c("Biopsy", "Surgery TC"))], dimred = "UMAP", col = segment)
+
+plotDR(spe[,which(spe$Type %in% c("Biopsy", "Surgery TC"))], dimred = "UMAP", col = SlideName)
+```
+
+## Remove batch, limma
+
+```{r}
+spe_lrb <- geomxBatchCorrection(spe,
+                       batch = colData(spe)$SlideName, method = "Limma",
+                       design = model.matrix(~Type, data = colData(spe)))
+```
+
+
+
+```{r}
+plotPairPCA(spe_lrb[,which(spe_lrb$Type %in% c("Biopsy", "Surgery TC"))], assay = 2, color = Type,
+            shape = segment, title = "Batch effect corrected, PCA")
+```
+
+
+```{r}
+plotPairPCA(spe_lrb[,which(spe_lrb$Type %in% c("Biopsy", "Surgery TC"))], assay = 2, color = SlideName,
+            shape = segment, title = "Batch effect corrected, PCA")
+```
+
+### UMAP
+
+```{r}
+set.seed(100)
+
+spe_lrb <- scater::runPCA(spe_lrb)
+
+spe_lrb <- scater::runUMAP(spe_lrb, dimred = "PCA", assay.type = 2)
+
+plotDR(spe_lrb[,which(spe_lrb$Type %in% c("Biopsy", "Surgery TC"))], dimred = "UMAP", col = Type, shape = segment)
+
+plotDR(spe_lrb[,which(spe_lrb$Type %in% c("Biopsy", "Surgery TC"))], dimred = "UMAP", col = segment)
+
+plotDR(spe_lrb[,which(spe_lrb$Type %in% c("Biopsy", "Surgery TC"))], dimred = "UMAP", col = SlideName)
+```
+
+## DE
+
+```{r}
+spe$DEvar <- paste0(spe$segment, "_", spe$Type) 
+table(spe$DEvar)
+```
+
+
+
+```{r}
+library(edgeR)
+library(limma)
+
+dge <- SE2DGEList(spe)
+
+```
+
+
+```{r}
+
+design <- model.matrix(~0 + DEvar + SlideName, data = colData(spe))
+
+colnames(design)
+```
+
+To simplify the factor name, here we edit the column name of the design matrix by removing the prefix "DEvar" and replacing spaces with underscores.
+
+```{r}
+colnames(design) <- gsub("^DEvar","",colnames(design))
+colnames(design) <- gsub(" ","_",colnames(design))
+  
+colnames(design)
+
+```
+
+In this analysis, we will be looking at comparison between B cell zone and T cell zone. The contrast for pairwise comparisons between different groups are set up in using the `makeContrasts` function from `Limma`.
+
+
+```{r}
+contr.matrix <- makeContrasts(
+   Sur_vs_Bio_inTumor = tumor_Surgery_TC - tumor_Biopsy,
+   Sur_vs_Bio_inStroma = stroma_Surgery_TC - stroma_Biopsy,
+   Sur_vs_Bio_whole = (tumor_Surgery_TC + stroma_Surgery_TC) - (tumor_Biopsy + stroma_Biopsy),
+   levels = colnames(design))
+```
+
+
+```{r}
+dge_all <- dge
+dge_all <- estimateDisp(dge_all, design = design, robust = TRUE)
+```
+
+```{r}
+plotBCV(dge_all, legend.position = "topleft", ylim = c(0, 1.3))
+bcv_df <- data.frame(
+  'BCV' = sqrt(dge_all$tagwise.dispersion),
+  'AveLogCPM' = dge_all$AveLogCPM,
+  'gene_id' = rownames(dge_all)
+)
+
+highbcv <- bcv_df$BCV > 0.8
+highbcv_df <- bcv_df[highbcv, ]
+points(highbcv_df$AveLogCPM, highbcv_df$BCV, col = "red")
+text(highbcv_df$AveLogCPM, highbcv_df$BCV, labels = highbcv_df$gene_id, pos = 4)
+```
+
+
+```{r}
+fit <- lmFit(assay(spe,2), design = design)
+
+fit_contrast <- contrasts.fit(fit, contrasts = contr.matrix)
+
+efit <- eBayes(fit_contrast, robust = TRUE)
+
+```
+
+
+
+```{r}
+results_efit<- decideTests(efit, p.value = 0.01, lfc = 0.5)
+summary_efit <- summary(results_efit)
+
+summary_efit
+```
+
+
+### Visualisation
+
+We can obtain the DE results by using the `TopTable` function.
+
+```{r}
+library(ggrepel)
+library(tidyverse)
+
+de_results <- list()
+de_genes_toptable <- list()
+for (n in colnames(efit$contrasts)) {
+  de_results[[n]] <- topTable(efit, coef = n, sort.by = "P", n = Inf)
+
+  de_genes_toptable[[n]] <- topTable(efit, coef = n, sort.by = "P", n = Inf, p.value = 0.01, lfc = 0.5)
+}
+```
+
+``` {r volcanoPlot, fig.width = 11, fig.height = 7, fig.wide = TRUE, warning = FALSE, message = FALSE}
+plotVolcano <- function(results, contrast){
+  results$Protein <- rownames(results)
+  # results = dge topTable
+  library(ggrepel)
+  # Categorize Results based on P-value & FDR for plotting
+  results$Color <- "NS or FC < 0.5"
+  results$Color[results$P.Value < 0.05] <- "P < 0.05"
+  results$Color[results$adj.P.Val < 0.05] <- "FDR < 0.05"
+  results$Color[results$adj.P.Val < 0.01] <- "FDR < 0.01"
+  results$Color[abs(results$logFC) < 0.5] <- "NS or FC < 0.5"
+  results$Color <- factor(results$Color,
+                          levels = c("NS or FC < 0.5", "P < 0.05",
+                                     "FDR < 0.05", "FDR < 0.01"))
+  
+  # pick top genes for either side of volcano to label
+  # order genes for convenience:
+  results$invert_P <- (-log10(results$P.Value)) * sign(results$logFC)
+  top_g <- c(results[,'Protein'][
+    order(results[,'invert_P'], decreasing = TRUE)[1:15]],
+    results[,'Protein'][
+      order(results[,'invert_P'], decreasing = FALSE)[1:15]])
+  top_g <- unique(top_g)
+  #results <- results[, -1*ncol(results)] # remove invert_P from matrix
+  
+  # Graph results
+  ggplot(results,
+         aes(x = logFC, y = -log10(P.Value),
+             color = Color, label = Protein)) +
+    geom_vline(xintercept = c(0.5, -0.5), lty = "dashed") +
+    geom_hline(yintercept = -log10(0.05), lty = "dashed") +
+    geom_point() +
+    labs(x = contrast, #"Enriched in Tubules <- log2(FC) -> Enriched in Glomeruli"
+         y = "Significance, -log10(P)",
+         color = "Significance") +
+    scale_color_manual(values = c(`FDR < 0.01` = "dodgerblue",
+                                  `FDR < 0.05` = "lightblue",
+                                  `P < 0.05` = "orange2",
+                                  `NS or FC < 0.5` = "gray"),
+                       guide = guide_legend(override.aes = list(size = 4))) +
+    scale_y_continuous(expand = expansion(mult = c(0,0.05))) +
+    geom_text_repel(data = subset(results, Protein %in% top_g & adj.P.Val < 0.01),
+                    size = 4, point.padding = 0.15, color = "black",
+                    min.segment.length = .1, box.padding = .2, lwd = 2,
+                    max.overlaps = 50) +
+    theme_bw(base_size = 16) +
+    theme(legend.position = "bottom")
+  
+}
+
+for (n in colnames(efit$contrasts)) {
+  print(plotVolcano(de_results[[n]], n))
+}
+```
+
+
+
+
+

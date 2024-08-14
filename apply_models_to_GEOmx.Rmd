@@ -1,0 +1,291 @@
+---
+title: "Apply models to GEOmx data"
+author: "Paolo Angelino"
+format: html
+editor: visual
+---
+
+
+Load data
+
+```{r}
+library(readr)
+library(dplyr)
+GEOMXcohort_pseudobulk_nuclei <- read_csv2("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/GEOMXcohort_pseudobulk_nuclei.csv")
+```
+
+```{r}
+test_data <- GEOMXcohort_pseudobulk_nuclei %>% filter(Response != "Mid responders") %>% select(-one_of(c("...1", "Code", "Response"))) 
+
+response <- GEOMXcohort_pseudobulk_nuclei %>% filter(Response != "Mid responders") %>% pull(Response)
+response <- ifelse(response == "Good responders", "yes", "no")
+```
+
+Load model
+
+```{r}
+#| echo: false
+# models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/randomSampling_modeling_extra_final_de_intersect_plus_bulk_genes_6datasets_scaled.rds")
+models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/randomSampling_modeling_extra_final_DEintersect_6datasets_scaled.rds")
+dim(models$gl$trainingData)
+```
+
+```{r}
+length(intersect(colnames(models$gl$trainingData), colnames(test_data)))
+missing_genes <- setdiff(colnames(models$gl$trainingData), colnames(test_data))
+missing_genes <- missing_genes[missing_genes != ".outcome"]
+for (n in missing_genes) {
+  test_data[,n] <- 0
+}
+summary(test_data[,1:10])
+test_data <- t(scale(t(as.matrix(test_data))))
+test_data <- test_data[,intersect(colnames(models$gl$trainingData), colnames(test_data))]
+summary(test_data[,1:10])
+#
+```
+
+
+## Test
+
+
+```{r}
+  test_res <- predict(models$gl, newdata =  test_data, type="prob")
+  print(pROC::plot.roc(response, test_res$yes, print.auc=TRUE))
+
+
+  test_res <- predict(models$rf, newdata =  test_data, type="prob")
+  print(pROC::plot.roc(response, test_res$yes, print.auc=TRUE))
+
+```
+
+# GSE87211
+
+```{r}
+# Version info: R 4.2.2, Biobase 2.58.0, GEOquery 2.66.0, limma 3.54.0
+################################################################
+#   Data plots for selected GEO samples
+library(GEOquery)
+library(limma)
+library(umap)
+
+# load series and platform data from GEO
+
+gset <- getGEO("GSE87211", GSEMatrix =TRUE, getGPL=TRUE, AnnotGPL=TRUE)
+if (length(gset) > 1) idx <- grep("GPL13497", attr(gset, "names")) else idx <- 1
+gset <- gset[[idx]]
+
+ex <- exprs(gset)
+# log2 transform
+qx <- as.numeric(quantile(ex, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+LogC <- (qx[5] > 100) ||
+          (qx[6]-qx[1] > 50 && qx[2] > 0)
+if (LogC) { ex[which(ex <= 0)] <- NaN
+  ex <- log2(ex) }
+
+# box-and-whisker plot
+dev.new(width=3+ncol(gset)/6, height=5)
+par(mar=c(7,4,2,1))
+title <- paste ("GSE87211", "/", annotation(gset), sep ="")
+boxplot(ex, boxwex=0.7, notch=T, main=title, outline=FALSE, las=2)
+dev.off()
+
+# expression value distribution plot
+par(mar=c(4,4,2,1))
+title <- paste ("GSE87211", "/", annotation(gset), " value distribution", sep ="")
+plotDensities(ex, main=title, legend=F)
+
+# mean-variance trend
+ex <- na.omit(ex) # eliminate rows with NAs
+plotSA(lmFit(ex), main="Mean variance trend, GSE87211")
+
+# UMAP plot (multi-dimensional scaling)
+ex <- ex[!duplicated(ex), ]  # remove duplicates
+ump <- umap(t(ex), n_neighbors = 15, random_state = 123)
+plot(ump$layout, main="UMAP plot, nbrs=15", xlab="", ylab="", pch=20, cex=1.5)
+library("maptools")  # point labels without overlaps
+pointLabel(ump$layout, labels = rownames(ump$layout), method="SANN", cex=0.6)
+
+gset.bkp <- gset
+```
+
+### Filter by treatment
+
+```{r}
+dim(gset)
+table(gset$`preoperative radiochemotherapy (rct):ch1`)
+```
+
+```{r}
+gset <- gset[,gset$`preoperative radiochemotherapy (rct):ch1` != "5-FU + RT"]
+gset <- gset[,gset$`tissue:ch1` == "rectal tumor"]
+gset <- gset[,gset$`depth of invasion before rct:ch1` != "NA" & gset$`depth of invasion after rct:ch1` != "NA"]
+```
+
+```{r}
+dim(gset)
+table(gset$`preoperative radiochemotherapy (rct):ch1`)
+```
+
+```{r}
+table(gset$`depth of invasion before rct:ch1`, gset$`depth of invasion after rct:ch1`)
+```
+
+```{r}
+table(gset$`lymph node metastasis before rct:ch1`, gset$`lymph node metastasis after rct:ch1`)
+```
+
+```{r}
+table(gset$`depth of invasion before rct:ch1`, as.numeric(gset$`depth of invasion before rct:ch1`) - as.numeric(gset$`depth of invasion after rct:ch1`) )
+```
+
+```{r}
+table(as.numeric(gset$`lymph node metastasis before rct:ch1`) - as.numeric(gset$`lymph node metastasis after rct:ch1`), 
+      as.numeric(gset$`depth of invasion before rct:ch1`) - as.numeric(gset$`depth of invasion after rct:ch1`) )
+```
+
+```{r}
+table(as.numeric(gset$`lymph node metastasis after rct:ch1`), 
+      as.numeric(gset$`depth of invasion before rct:ch1`) - as.numeric(gset$`depth of invasion after rct:ch1`) )
+```
+
+## define response
+
+```{r}
+# remove mid responders
+gset <- gset[,as.numeric(gset$`depth of invasion before rct:ch1`) - as.numeric(gset$`depth of invasion after rct:ch1`) != 2]
+gset <- gset[,as.numeric(gset$`depth of invasion before rct:ch1`) - as.numeric(gset$`depth of invasion after rct:ch1`) != 1]
+dim(gset)
+response <- ifelse( as.numeric(gset$`depth of invasion before rct:ch1`) - as.numeric(gset$`depth of invasion after rct:ch1`) > 1, "yes", "no" )
+table(response)
+```
+
+```{r}
+gset <- gset[!duplicated(fData(gset)$GENE_SYMBOL),]
+gset <- gset[fData(gset)$GENE_SYMBOL %in% intersect(colnames(models$gl$trainingData), fData(gset)$GENE_SYMBOL),]
+dim(gset)
+length(intersect(colnames(models$gl$trainingData), fData(gset)$GENE_SYMBOL))
+missing_genes <- setdiff(colnames(models$gl$trainingData), fData(gset)$GENE_SYMBOL)
+missing_genes <- missing_genes[missing_genes != ".outcome"]
+
+all_genes  <- c(rownames(gset) , missing_genes)
+all_genes
+```
+
+```{r}
+test_data <- ex
+test_data <- as.data.frame(test_data)
+for (n in missing_genes) {
+  test_data[n,] <- 0
+}
+summary(test_data[,1:10])
+test_data <- scale(as.matrix(test_data))
+# test_data <- test_data[,intersect(colnames(models$gl$trainingData), colnames(test_data))]
+summary(test_data[,1:10])
+test_data <- test_data[all_genes,colnames(gset)]
+rownames(test_data) <- c(fData(gset)$GENE_SYMBOL, missing_genes)
+```
+
+
+## Test
+
+
+```{r}
+  test_res <- predict(models$gl, newdata =  t(test_data), type="prob")
+  print(pROC::plot.roc(response, test_res$yes, print.auc=TRUE))
+
+
+  test_res <- predict(models$rf, newdata =  t(test_data), type="prob")
+  print(pROC::plot.roc(response, test_res$yes, print.auc=TRUE))
+
+```
+
+### Filter by treatment
+
+For our study we selected samples from tumours treated with 5FU infusion alone and a total irradiation dose of 50.4 Gy (28 x 1.8 Gy) where T and N stage before RT was not missing (Suppl Fig 1C). Tumours showing T0N0 stage after RT treatment were classified as pCRs, otherwise as non-pCRs.  
+
+```{r}
+gset <- gset.bkp
+```
+
+```{r}
+#gset <- gset[,gset$`preoperative radiochemotherapy (rct):ch1` == "5-FU + RT"]
+gset <- gset[,gset$`tissue:ch1` == "rectal tumor"]
+gset <- gset[,gset$`depth of invasion before rct:ch1` != "NA" & gset$`depth of invasion after rct:ch1` != "NA"]
+```
+
+```{r}
+dim(gset)
+```
+
+```{r}
+table(gset$`depth of invasion after rct:ch1`, gset$`lymph node metastasis after rct:ch1`)
+```
+
+## define response
+
+```{r}
+# remove mid responders
+gset <- gset[, as.numeric(gset$`depth of invasion after rct:ch1`) != 2]
+#gset <- gset[, as.numeric(gset$`depth of invasion after rct:ch1`) != 1]
+dim(gset)
+response <- ifelse(gset$`depth of invasion after rct:ch1` < 2 & gset$`lymph node metastasis after rct:ch1` == 0, "yes", "no" )
+table(response)
+```
+
+```{r}
+gset <- gset[!duplicated(fData(gset)$GENE_SYMBOL),]
+gset <- gset[fData(gset)$GENE_SYMBOL %in% intersect(colnames(models$gl$trainingData), fData(gset)$GENE_SYMBOL),]
+dim(gset)
+length(intersect(colnames(models$gl$trainingData), fData(gset)$GENE_SYMBOL))
+missing_genes <- setdiff(colnames(models$gl$trainingData), fData(gset)$GENE_SYMBOL)
+missing_genes <- missing_genes[missing_genes != ".outcome"]
+
+all_genes  <- c(rownames(gset) , missing_genes)
+all_genes
+```
+
+```{r}
+test_data <- ex
+test_data <- as.data.frame(test_data)
+for (n in missing_genes) {
+  test_data[n,] <- 0
+}
+summary(test_data[,1:10])
+test_data <- scale(as.matrix(test_data))
+# test_data <- test_data[,intersect(colnames(models$gl$trainingData), colnames(test_data))]
+summary(test_data[,1:10])
+test_data <- test_data[all_genes,colnames(gset)]
+rownames(test_data) <- c(fData(gset)$GENE_SYMBOL, missing_genes)
+```
+
+
+## Test
+
+
+```{r}
+  test_res <- predict(models$gl, newdata =  t(test_data), type="prob")
+  print(pROC::plot.roc(response, test_res$yes, print.auc=TRUE))
+
+
+  test_res <- predict(models$rf, newdata =  t(test_data), type="prob")
+  print(pROC::plot.roc(response, test_res$yes, print.auc=TRUE))
+
+```
+
+# Compare gene lists 
+
+```{r}
+eBiomed_33genes <- read_csv("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/eBiomed_33genes.csv")
+keep <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds")
+```
+
+```{r}
+for (n in names(keep)) {
+  print(n)  
+  print(intersect(keep[[n]], eBiomed_33genes$Gene.Symbol))
+}
+```
+
+
+
+
