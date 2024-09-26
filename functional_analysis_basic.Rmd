@@ -1,0 +1,214 @@
+---
+title: "Test functional analysis on GEO dataset collection"
+author:
+  - name: Paolo Angelino
+    affiliation:
+      - TDS Facility, SIB Swiss Institute of Bioinformatics, Lausanne, Switzerland
+    email: paolo.angelino@sib.swiss
+date: "`r format(Sys.time(), '%d %b %Y')`"
+output:
+  prettydoc::html_pretty:
+    theme: hpstr
+    toc: yes
+    toc_depth: 2
+    number_sections: yes
+    fig_caption: yes
+    df_print: paged
+params:
+  gene.list: /data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds # gene symbol character vector
+  plot.dir: /data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/GSEA_plots
+  selected.list: "sig_4_6_0.05"
+---
+
+```{r}
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+
+```{r}
+library(ReactomePA)
+library(clusterProfiler)
+require(dplyr)
+library(ggplot2)
+library(stringr)
+```
+
+```{r}
+# CRT.extrR.markers <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/CRT.extrR.markers.rds")
+# gene.symbol <- CRT.extrR.markers$Symbol
+
+gene.symbol <- readRDS(params$gene.list)
+
+if (!is.null(params$selected.list)) {
+  gene.symbol <- gene.symbol[[params$selected.list]]
+}
+gene.symbol
+
+
+DE_RES <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_6Datasets_scaled_2.rds")
+DE_UP <- intersect(gene.symbol, rownames(DE_RES %>% filter(logFC >0 )))
+DE_DOWN <- intersect(gene.symbol, rownames(DE_RES %>% filter(logFC <0 )))
+```
+
+
+```{r}
+ens2annot <- clusterProfiler::bitr(
+    geneID = gene.symbol, 
+    fromType = "SYMBOL", 
+    toType = c("ENTREZID", "ENSEMBL"), 
+    OrgDb = "org.Hs.eg.db", 
+    drop = FALSE
+  ) %>% 
+    distinct(SYMBOL, .keep_all = TRUE) %>%     # Heuristic to remove duplicated entrez ids.
+    as_tibble()
+
+ens2annot <- ens2annot[!is.na(ens2annot$ENTREZID),]
+```
+
+## Load Gene sets
+
+We load the gene sets using the `msigdb` package, and extact only the gene sets we described above. This might take a few minutes to run.
+
+```{r}
+
+library(msigdb)
+library(GSEABase)
+
+msigdb_hs <- getMsigdb(version = '7.2')
+msigdb_hs <- appendKEGG(msigdb_hs)
+
+sc <- listSubCollections(msigdb_hs)
+collections <- listCollections(msigdb_hs)
+
+#gsc <- c(subsetCollection(msigdb_hs, c('h')),
+#  subsetCollection(msigdb_hs, 'c2', sc[grepl("^CP:",sc)]),
+#  subsetCollection(msigdb_hs, 'c5', sc[grepl("^GO:",sc)])) %>%
+#  GeneSetCollection()
+
+gsc <- c(subsetCollection(msigdb_hs, c('h')),
+  subsetCollection(msigdb_hs, subcollection = 'CP:REACTOME'),
+  subsetCollection(msigdb_hs, subcollection = 'CP:KEGG')) %>%
+  GeneSetCollection()
+
+t2g_list <- geneIds(gsc)
+t2g <- data.frame(term=character(0),gene=character(0)) 
+for (n in names(t2g_list)) {
+  t2g <- rbind(t2g, data.frame(term=n, gene=t2g_list[[n]]))
+}
+```
+
+## ORA
+
+```{r}
+x <- enrichPathway(gene=ens2annot$ENTREZID, pvalueCutoff =1, readable=TRUE)
+head(x)
+```
+
+```{r}
+em <- enricher(ens2annot$SYMBOL, minGSSize = 5, maxGSSize = 100, TERM2GENE=t2g, pvalueCutoff = 0.05, qvalueCutoff = 1, pAdjustMethod = "none")
+em
+```
+
+```{r, fig.height=6, fig.width=16}
+p <- barplot(em, showCategory=20, color = "pvalue") + scale_y_discrete(labels=function(x) str_wrap(x, width=40)) 
+p
+ggsave(
+      filename = paste0("OverEnrichementBarplot.pdf"), 
+      plot = p, path = params$plot.dir
+    )
+```
+```{r, fig.height=6, fig.width=16}
+mutate(em, qscore = -log(p.adjust, base=10)) %>% 
+    barplot(x="qscore", showCategory=20, color = "pvalue") + scale_y_discrete(labels=function(x) str_wrap(x, width=40)) 
+```
+## ORA UP
+
+```{r}
+
+em_up <- enricher(DE_UP, minGSSize = 5, maxGSSize = 100, TERM2GENE=t2g, pvalueCutoff = 0.05, qvalueCutoff = 1, pAdjustMethod = "none")
+```
+
+```{r, fig.height=6, fig.width=16}
+p <- barplot(em_up, showCategory=20, color = "pvalue") + scale_y_discrete(labels=function(x) str_wrap(x, width=40)) 
+p
+ggsave(
+      filename = paste0("OverEnrichementBarplot_UPregulated.pdf"), 
+      plot = p, path =  params$plot.dir
+    )
+
+```
+
+```{r, fig.height=6, fig.width=16}
+mutate(em_up, qscore = -log(p.adjust, base=10)) %>% 
+    barplot(x="qscore", showCategory=20, color = "pvalue") + scale_y_discrete(labels=function(x) str_wrap(x, width=40)) 
+```
+
+## ORA DOWN
+
+```{r}
+
+em_down <- enricher(DE_UP, minGSSize = 5, maxGSSize = 100, TERM2GENE=t2g, pvalueCutoff = 0.05, qvalueCutoff = 1, pAdjustMethod = "none")
+```
+
+```{r, fig.height=6, fig.width=16}
+p <- barplot(em_down, showCategory=20, color = "pvalue")  + scale_y_discrete(labels=function(x) str_wrap(x, width=40)) 
+p
+ggsave(
+      filename = paste0("OverEnrichementBarplot_UPregulated.pdf"), 
+      plot = p, path = params$plot.dir
+    )
+
+```
+
+```{r, fig.height=6, fig.width=16}
+mutate(em_down, qscore = -log(p.adjust, base=10)) %>% 
+    barplot(x="qscore", showCategory=20)  + scale_y_discrete(labels=function(x) str_wrap(x, width=40))
+```
+
+
+## GSEA
+
+```{r}
+genelist <- -log10(DE_RES$P.Value_avg)
+names(genelist) <- rownames(DE_RES) 
+genelist <- genelist[order(genelist, decreasing = T)]
+```
+
+
+```{r}
+em <- GSEA(genelist, 
+                pvalueCutoff = 0.05,
+                pAdjustMethod = "none",
+           TERM2GENE=t2g, scoreType = "pos")
+head(em)
+```
+
+### Plots
+
+```{r, fig.height=6, fig.width=16}
+library(enrichplot)
+em1 <- em
+em1@result$Description <- str_trunc(em1@result$ID, width = 60) 
+
+p <-  dotplot(em1, showCategory=20, color="pvalue")  + scale_y_discrete(labels=function(x) str_wrap(x, width=30)) 
+p
+ggsave(
+      filename = paste0("GSEADotplot.pdf"), 
+      plot = p, path =  params$plot.dir
+    )
+```
+
+```{r, fig.width=12}
+upsetplot(em1)
+```
+
+```{r, fig.width=8, fig.height=7}
+ridgeplot(em1, showCategory = 10)
+```
+
+```{r}
+gseaplot2(em1, geneSetID = 1:3)
+```
+
+
+

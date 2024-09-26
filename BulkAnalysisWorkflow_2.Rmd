@@ -1,5 +1,5 @@
 ---
-title: "Analysing bulk transcriptomics data using standR, limma and vissE, 4 datasets, scaled data"
+title: "Analysing bulk transcriptomics data using standR, limma and vissE, 9 datasets, scaled data"
 author:
   - name: Paolo Angelino
     affiliation:
@@ -25,7 +25,11 @@ keywords: DifferentialExpression, Normalization, QualityControl, Spatial, Transc
 params:
   column2plot: !r c("batch","Platform","Response")
   usescaled: TRUE
-  save_de_results : "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_bulkDatasets_scaled.rds"
+  save_de_results : "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_9Datasets_scaled_2.rds"
+  cv: 10
+  seed: 13947
+  ensemble_method: "intersect"
+  pval_threshold: 0.05
 ---
 
 <p>
@@ -188,8 +192,8 @@ if (params$usescaled) {
 ## filter samples
 
 ```{r}
-# spe <- spe[, spe$batch %in% c("GSE150082", "GSE94104", "GSE133057", "GSE93375")]
-spe <- spe[, spe$batch %in% c("GSE190826", "GSE209746")]
+spe <- spe[, spe$batch %in% c("GSE150082", "GSE94104", "GSE133057", "GSE93375", "GSE209746", "GSE145037", "GSE190826",  "GSE45404_GPL1", "GSE45404_GPL2")]
+#spe <- spe[, spe$batch %in% c("GSE209746")] #, "GSE150082", "GSE94104", "GSE133057", "GSE93375", "GSE145037"
 ```
 
 
@@ -483,144 +487,131 @@ spe$DEvar <- paste0(spe$segment, "_", spe$Response)
 table(spe$DEvar)
 ```
 
-
-
-
 ```{r}
 library(edgeR)
 library(limma)
 
-dge <- SE2DGEList(spe)
+run_limma <- function(lspe, lassay_to_use, verbose = TRUE, p.value = 0.05, lfc = 0.0){
 
-```
+  design <- model.matrix(~0 + Response + batch, data = colData(lspe))
 
-
-```{r}
-
-design <- model.matrix(~0 + Response + batch, data = colData(spe))
-
-colnames(design)
-```
-
-To simplify the factor name, here we edit the column name of the design matrix by removing the prefix "DEvar" and replacing spaces with underscores.
-
-```{r}
-colnames(design) <- gsub("^Response","",colnames(design))
-colnames(design) <- gsub(" ","_",colnames(design))
+  if(verbose) print(colnames(design))
   
-colnames(design)
+  #To simplify the factor name, here we edit the column name of the design matrix by removing the prefix "DEvar" and replacing spaces with underscores.
 
-```
-
-The contrast for pairwise comparisons between different groups are set up in using the `makeContrasts` function from `Limma`.
-
-
-```{r}
-contr.matrix <- makeContrasts(
+  colnames(design) <- gsub("^Response","",colnames(design))
+  colnames(design) <- gsub(" ","_",colnames(design))
+  
+  if(verbose) print(colnames(design))
+    
+  # The contrast for pairwise comparisons between different groups are set up in using the `makeContrasts` function from `Limma`.
+  contr.matrix <- makeContrasts(
    Yes_vs_NO = yes - no,
    levels = colnames(design))
+
+  ## Differential expression
+
+  # In the `limma-voom` pipeline, linear modelling is carried out on the log-CPM values by using the `voom`, `lmFit`, `contrasts.fit` and `eBayes` functions. In specific cases where users like to take more considerations of the log fold changes in the statistical analysis, the `treat` function is applied. The `treat` function, t-tests relative to a threshold, allows testing formally the hypothesis (with associated p-values) that the differential expression is greater than a given threshold, fold-change in this case. But be aware of avoiding using `eBayes` and `treat` for different contrasts for the same analysis.
+
+  # **Notes: Here we have microarray data, so the limma without voom pipeline is used**
+  v <- assay(lspe, lassay_to_use)
+
+  fit <- lmFit(v, design = design)
+  
+  fit_contrast <- contrasts.fit(fit, contrasts = contr.matrix)
+
+  efit <- eBayes(fit_contrast, robust = TRUE)
+  
+  results_efit<- decideTests(efit, adjust.method = "none", p.value = p.value, lfc = lfc)
+  summary_efit <- summary(results_efit)
+
+  if(verbose) print(summary_efit)
+
+  
+  my_de_results <- topTable(efit, coef = 1, sort.by = "none", n = Inf) # sort by none
+
+  # We can obtain the DE results by using the `TopTable` function.
+
+  return(my_de_results)
+}
 ```
 
-It is recommended to filter out genes with low coverage in the dataset to allow a more accurate mean-variance relationship and reduce the number of statistical tests. The `filterByExpr` function from the `edgeR` package to filter genes based on the model matrix, keeping as many genes as possible with reasonable counts.
-Here genes were already filtered.
-
-
-```{r, eval=FALSE}
-# keep <- filterByExpr(dge, design)
-```
-
-Here we can see that no gene is filtered.
-
-```{r}
-# table(keep)
-
-# rownames(dge)[!keep]
-
-# dge_all <- dge[keep, ]
-dge_all <- dge
-```
-
-
-### BCV check
-
-```{r}
-dge_all <- estimateDisp(dge_all, design = design, robust = TRUE)
-```
-
-Biological CV (BCV) is the coefficient of variation with which the (unknown) true abundance of the gene varies between replicate RNA samples.
-For more detail about dispersion and BCV calculation, see the [edgeR user guide](https://www.bioconductor.org/packages/devel/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf).
-
-There are three main features we need to look at in the BCV plot of a GeoMx dataset:
-
-1. Dispersion trend: the dispersion trend is expected to become flat in genes with larger count.
-
-2. Common trend: should be relatively small. In RNA-seq data, a common trend between 0.2 and 0.4 is expected in human sample, 0.05 - 0.2 is expected in mice and cell lines. In the GeoMx experiments, since we're sampling segments from human tissues, we expected it to be smaller than the RNA-seq human samples.
-
-3. Genes with low count: be very careful if you see a strips of genes show up with high BCV and low count.
-
-4. genes with high BCV: should also be careful about the genes with high BCV as well, very likely they will be identified as DE genes and driving the variation we saw in the PCA plots. So it is alway good practice to check the high BCV genes, consulting with the biologists to make sure that they expected to be highly variable.
-
-
-```{r}
-plotBCV(dge_all, legend.position = "topleft", ylim = c(0, 1.3))
-bcv_df <- data.frame(
-  'BCV' = sqrt(dge_all$tagwise.dispersion),
-  'AveLogCPM' = dge_all$AveLogCPM,
-  'gene_id' = rownames(dge_all)
-)
-
-highbcv <- bcv_df$BCV > 0.8
-highbcv_df <- bcv_df[highbcv, ]
-points(highbcv_df$AveLogCPM, highbcv_df$BCV, col = "red")
-text(highbcv_df$AveLogCPM, highbcv_df$BCV, labels = highbcv_df$gene_id, pos = 4)
-```
-
-
-## Differential expression
-
-In the `limma-voom` pipeline, linear modelling is carried out on the log-CPM values by using the `voom`, `lmFit`, `contrasts.fit` and `eBayes` functions. In specific cases where users like to take more considerations of the log fold changes in the statistical analysis, the `treat` function is applied. The `treat` function, t-tests relative to a threshold, allows testing formally the hypothesis (with associated p-values) that the differential expression is greater than a given threshold, fold-change in this case. But be aware of avoiding using `eBayes` and `treat` for different contrasts for the same analysis.
-
-**Notes: Here we have microarray data, so the limma without voom pipeline is used**
-
-
-```{r}
-#v <- voom(dge_all, design, plot = TRUE) 
-#rownames(v) <- rowData(spe)[rownames(v),"gene_name"]
-v <- assay(spe, assay_to_use)
-
-fit <- lmFit(v, design = design)
-
-fit_contrast <- contrasts.fit(fit, contrasts = contr.matrix)
-
-efit <- eBayes(fit_contrast, robust = TRUE)
-
-```
 
 **I turned off the adjusted pvalue, as no gene is significant after adjustment**
 
 ```{r}
-results_efit<- decideTests(efit, adjust.method = "none", p.value = 0.05, lfc = 0.0)
-summary_efit <- summary(results_efit)
+if(params$cv == 1) {
+  de_results <- run_limma(spe, assay_to_use)
+  de_results$gene_name <- rownames(de_results)
+  de_genes_toptable <- de_results[de_results$P.Value <= params$pval_threshold, ]
+} else {
+  set.seed(params$seed)
+  my_folds <- caret::createFolds(spe$Response, k = params$cv)
+  
+  # structure of "my_fold"
+  my_folds %>% glimpse
+  # distribution of class is preserved in each fold
+  my_folds %>% 
+    map_df(~prop.table(table(spe$Response[.])))
 
-summary_efit
+  my_combn <- combn(names(my_folds),params$cv*0.8)
+  
+  de_all <- list()
+  for(n in 1:ncol(my_combn)){
+    ids = unlist(my_folds[my_combn[,n]])
+    de_results <- run_limma(spe[,ids], assay_to_use)
+    de_all[[n]] <- de_results
+  }
+  
+  getMedians <- function(my_de_all, i){
+    vals <- lapply(my_de_all, function(x){
+      x[,i]
+    })
+    vals <- do.call(cbind, vals)
+    rowMedians(vals)
+  }
+
+  getSds <- function(my_de_all, i){
+    vals <- lapply(my_de_all, function(x){
+      x[,i]
+    })
+    vals <- do.call(cbind, vals)
+    rowSds(vals)
+  }
+  
+  getPval <- function(my_de_all, i, method){
+    vals <- lapply(my_de_all, function(x){
+      x[,i]
+    })
+    vals <- do.call(cbind, vals)
+    if(method == "union"){
+      rowMins(vals)      
+    } else if (method == "intersect") {
+      rowMaxs(vals)      
+    }
+  }
+  
+  names(de_results)
+  de_results <- data.frame(logFC = getMedians(de_all,1), logFC_sd = getSds(de_all,1), 
+                           AveExpr = getMedians(de_all,2), AveExpr_sd = getSds(de_all,2), 
+                           t = getMedians(de_all, 3),
+                           P.Value = getPval(de_all,4,method = params$ensemble_method),
+                           P.Value_union = getPval(de_all,4,method = "union"),
+                           P.Value_intersect = getPval(de_all,4,method = "intersect"),
+                           P.Value_avg = getMedians(de_all,4), P.value_sd = getSds(de_all,4), 
+                           adj.P.Val = getPval(de_all,5,method = params$ensemble_method), 
+                           B = getMedians(de_all,5),
+                           row.names = rownames(de_all[[1]]))
+  de_results <- de_results[order(de_results$P.Value, decreasing = F),]
+  de_results$gene_name <- rownames(de_results)
+  de_genes_toptable <- de_results[de_results$P.Value <= params$pval_threshold, ] 
+}
+
 ```
+
 
 ### Visualisation
 
-We can obtain the DE results by using the `TopTable` function.
-
-```{r}
-library(ggrepel)
-library(tidyverse)
-
-de_results <- list()
-de_genes_toptable <- list()
-for (n in colnames(efit$contrasts)) {
-  de_results[[n]] <- topTable(efit, coef = n, sort.by = "P", n = Inf)
-
-  de_genes_toptable[[n]] <- topTable(efit, coef = n, adjust.method = "none", sort.by = "P", n = Inf, p.value = 0.05, lfc = 0.0)
-}
-```
 
 ``` {r volcanoPlot, fig.width = 11, fig.height = 7, fig.wide = TRUE, warning = FALSE, message = FALSE}
 plotVolcano <- function(results, contrast){
@@ -671,34 +662,28 @@ plotVolcano <- function(results, contrast){
   
 }
 
-for (n in colnames(efit$contrasts)) {
-  res_tmp <- de_results[[n]]
-  res_tmp$gene_name <- rownames(res_tmp)
-  print(plotVolcano(res_tmp, n))
-}
+print(plotVolcano(de_results, "Yes_vs_NO"))
 ```
 
 We can then visualise the DE genes with MA plot.
 
 ```{r fig.width=10, fig.height=9}
-for (n in colnames(efit$contrasts)) {
-  p <- de_results[[n]] %>% 
-    mutate(DE = ifelse(logFC > 0 & adj.P.Val <0.1, "UP", 
-                       ifelse(logFC <0 & adj.P.Val<0.1, "DOWN", "NOT DE"))) %>%
+  p <- de_results %>% 
+    mutate(DE = ifelse(logFC > 0 & P.Value <0.1, "UP", 
+                       ifelse(logFC <0 & P.Value <0.1, "DOWN", "NOT DE"))) %>%
     ggplot(aes(AveExpr, logFC, col = DE)) + 
     geom_point(shape = 1, size = 1) + 
-    geom_text_repel(data = de_genes_toptable[[n]] %>% 
-                      mutate(DE = ifelse(logFC > 0 & adj.P.Val <0.1, "UP", 
-                                         ifelse(logFC <0 & adj.P.Val<0.1, "DOWN", "NOT DE"))) %>%
+    geom_text_repel(data = de_genes_toptable %>% 
+                      mutate(DE = ifelse(logFC > 0 & P.Value <0.1, "UP", 
+                                         ifelse(logFC <0 & P.Value <0.1, "DOWN", "NOT DE"))) %>%
                       rownames_to_column(), aes(label = rowname)) +
     theme_bw() +
     xlab("Average log-expression") +
     ylab("Log-fold-change") +
-    ggtitle(n) +
+    ggtitle("YES_vs_NO") +
     scale_color_manual(values = c("blue","gray","red")) +
     theme(text = element_text(size=15))
   print(p)
-}
 ```
 
 
@@ -711,16 +696,14 @@ library(DT)
 updn_cols <- c(RColorBrewer::brewer.pal(6, 'Greens')[2], RColorBrewer::brewer.pal(6, 'Purples')[2])
 
 de_tables <- list()
-for (n in colnames(efit$contrasts)) {
-  
-  de_tables[[n]] <- de_genes_toptable[[n]] %>% 
+
+  de_tables[[1]] <- de_genes_toptable %>% 
     dplyr::select(c("logFC", "AveExpr", "P.Value", "adj.P.Val")) %>%
     DT::datatable(caption = n) %>%
     DT::formatStyle('logFC',
                     valueColumns = 'logFC',
                     backgroundColor = DT::styleInterval(0, rev(updn_cols))) %>%
     DT::formatSignif(1:4, digits = 4)
-}
 ```
 
 ```{r, results='asis'}
@@ -742,9 +725,9 @@ plot all genes with an FDR < 0.01.
 
 ``` {r heatmap2, eval = TRUE, fig.width = 12, fig.height = 6.5, fig.wide = TRUE}
 # select top significant genes based on significance, plot with pheatmap
-results <- de_genes_toptable[[1]]
+results <- de_genes_toptable
 results$gene_name <- rownames(results)
-GOI <- unique(subset(results, `adj.P.Val` < 0.05 & abs(logFC) > 0.5)$gene_name)
+GOI <- unique(subset(results, `P.Value` < 0.05 & abs(logFC) > 0)$gene_name)
 GOI <- which(rowData(spe_lrb)$gene_name %in% GOI)
 pheatmap::pheatmap(assay(spe_lrb[GOI,], 2),
          scale = "row", 
@@ -806,6 +789,20 @@ gsc <- c(subsetCollection(msigdb_hs, c('h')),
 ## Enrichment analysis
 
 Preprocessing is conducted on these genesets, filtering out genesets with less than 5 genes and creating indices vector list for formatting on the results before applying `fry`.
+
+```{r}
+v <- assay(spe, assay_to_use)
+
+design <- model.matrix(~0 + Response + batch, data = colData(spe))
+
+colnames(design) <- gsub("^Response","",colnames(design))
+colnames(design) <- gsub(" ","_",colnames(design))
+  
+contr.matrix <- makeContrasts(
+   Yes_vs_NO = yes - no,
+   levels = colnames(design))
+```
+
 
 ```{r}
 fry_indices <- ids2indices(lapply(gsc, geneIds), rownames(v), remove.empty = FALSE)

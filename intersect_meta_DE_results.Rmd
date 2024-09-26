@@ -4,10 +4,21 @@ output: html_notebook
 ---
 
 ```{r}
+require(dplyr)
+```
+
+
+```{r}
 CRT.extrR.markers <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/CRT.extrR.markers.rds")
-DE_4datasets_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_4datasets_scaled.rds")
-DE_alldatasets_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_alldatasets_scaled.rds")
-DE_bulkDatasets_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_bulkDatasets_scaled.rds")
+DE_4datasets_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/V1.0/DE_4datasets_scaled.rds")
+DE_alldatasets_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/V1.0/DE_alldatasets_scaled.rds")
+DE_bulkDatasets_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/V1.0/DE_bulkDatasets_scaled.rds")
+DE_9datasets_cv <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_9Datasets_scaled_2.rds")
+DE_6datasets_cv <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_6Datasets_scaled_2.rds")
+DE_5MAdatasets_cv <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_5MADatasets_scaled_2.rds")
+DE_4MAdatasets_cv <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_4MADatasets_scaled_2.rds")
+DE_4MAbulkdatasets_cv <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_4MAbulkDatasets_scaled_2.rds")
+DE_bulkdataset_cv <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_bulkDataset_scaled_2.rds")
 ```
 
 
@@ -25,6 +36,50 @@ DE_bulkDatasets_scaled <- DE_bulkDatasets_scaled[[1]]
 DE_4datasets_scaled <- DE_4datasets_scaled %>% filter(P.Value <= 0.05)
 DE_alldatasets_scaled <- DE_alldatasets_scaled %>% filter(P.Value <= 0.05)
 DE_bulkDatasets_scaled <- DE_bulkDatasets_scaled %>% filter(P.Value <= 0.05)
+DE_9datasets_cv_top <- DE_9datasets_cv %>% filter(P.Value <= 0.05)
+DE_6datasets_cv_top <- DE_6datasets_cv %>% filter(P.Value <= 0.05)
+DE_5MAdatasets_cv_top <- DE_5MAdatasets_cv %>% filter(P.Value <= 0.05)
+DE_bulkdataset_cv_top <- DE_bulkdataset_cv %>% filter(P.Value <= 0.05)
+DE_6datasets_cv_300 <- DE_6datasets_cv[1:300,]
+DE_5MAdatasets_cv_300 <- DE_5MAdatasets_cv[1:300,]
+DE_4MAdatasets_cv_300 <- DE_4MAdatasets_cv[1:300,]
+DE_4MAbulkdatasets_cv_300 <- DE_4MAbulkdatasets_cv[1:300,]
+DE_bulkdataset_cv_300 <- DE_bulkdataset_cv[1:300,]
+```
+
+```{r}
+#sort by LogFC
+DE_6datasets_cv_1000 <- DE_6datasets_cv[1:1000,]
+#DE_6datasets_cv_sorted <- DE_6datasets_cv_1000 [DE_6datasets_cv_1000$logFC > 0.2,]
+DE_6datasets_cv_sorted <- DE_6datasets_cv_1000[order(DE_6datasets_cv_1000$P.Value, decreasing = F), ]
+dim(DE_6datasets_cv_sorted)
+DE_6datasets_cv_sorted_top <- DE_6datasets_cv_sorted[1:500,"gene_name"]
+length(DE_6datasets_cv_sorted_top)
+```
+
+```{r}
+meta_intersect_unionDE <- intersect(CRT.extrR.markers$Symbol, unique(c(rownames(DE_4datasets_scaled), rownames(DE_alldatasets_scaled))))
+de_intersect_genes <- intersect(rownames(DE_4datasets_scaled), rownames(DE_alldatasets_scaled))
+```
+
+```{r}
+de_intersect_plus_bulk_genes <- intersect(union(rownames(DE_bulkDatasets_scaled),rownames(DE_4datasets_scaled)),rownames(DE_alldatasets_scaled))
+length(de_intersect_plus_bulk_genes)
+```
+
+
+```{r}
+ggvenn::ggvenn(list(DETOP=DE_6datasets_cv_1000$gene_name,DEintersect=de_intersect_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+ggvenn::ggvenn(list(DETOP=DE_6datasets_cv_sorted_top,DEintersect=de_intersect_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
 ```
 
 ```{r}
@@ -32,6 +87,70 @@ length(intersect(CRT.extrR.markers$Symbol, rownames(DE_4datasets_scaled)))
 length(intersect(CRT.extrR.markers$Symbol, rownames(DE_alldatasets_scaled)))
 length(intersect(rownames(DE_4datasets_scaled), rownames(DE_alldatasets_scaled)))
 ```
+
+```{r}
+totRank1 <- rank(DE_6datasets_cv$P.Value) + rank(DE_6datasets_cv$logFC) + rank(DE_6datasets_cv$AveExpr)
+DE_6datasets_cv_byrank <- DE_6datasets_cv[order(totRank1)[1:1000],]
+totRank2 <- rank(DE_4MAdatasets_cv$P.Value) + rank(DE_4MAdatasets_cv$logFC) + rank(DE_4MAdatasets_cv$AveExpr)
+DE_4MAdatasets_cv_byrank <- DE_4MAdatasets_cv[order(totRank2)[1:1000],]
+```
+
+```{r}
+totRank1 <- rank(DE_6datasets_cv$P.Value_avg ) # + rank(1/DE_6datasets_cv$logFC) + rank(1/DE_6datasets_cv$AveExpr)
+DE_6datasets_cv_byrank <- DE_6datasets_cv[order(totRank1, decreasing = F)[1:1000],]
+totRank2 <- rank(DE_4MAdatasets_cv$P.Value_avg ) # + rank(1/DE_4MAdatasets_cv$logFC) + rank(1/DE_4MAdatasets_cv$AveExpr)
+DE_4MAdatasets_cv_byrank <- DE_4MAdatasets_cv[order(totRank2, decreasing = F)[1:1000],]
+```
+
+```{r}
+ggvenn::ggvenn(list(DE4rank=DE_4MAdatasets_cv_byrank$gene_name, DE6rank=DE_6datasets_cv_byrank$gene_name, DEint=de_intersect_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+length(which(DE_6datasets_cv$P.Value_avg < 0.1))
+length(which(DE_4MAdatasets_cv$P.Value_avg < 0.1))
+DE_6datasets_cv_sig <- DE_6datasets_cv[DE_6datasets_cv$P.Value_avg < 0.1,]
+DE_4MAdatasets_cv_sig <- DE_4MAdatasets_cv[DE_4MAdatasets_cv$P.Value_avg < 0.1,]
+ggvenn::ggvenn(list(DE4sig=DE_4MAdatasets_cv_sig$gene_name, DE6sig=DE_6datasets_cv_sig$gene_name, DEint=de_intersect_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+sig_4_6_0.05 <- intersect( DE_6datasets_cv[DE_6datasets_cv$P.Value_avg < 0.05,"gene_name"], DE_4MAdatasets_cv[DE_4MAdatasets_cv$P.Value_avg < 0.05,"gene_name"] )
+sig_4_6_0.1 <- intersect( DE_6datasets_cv[DE_6datasets_cv$P.Value_avg < 0.1,"gene_name"], DE_4MAdatasets_cv[DE_4MAdatasets_cv$P.Value_avg < 0.1,"gene_name"] )
+length(sig_4_6_0.05)
+length(sig_4_6_0.1)
+```
+
+## 9 datasets
+
+```{r}
+ggvenn::ggvenn(list(DE9sig=DE_9datasets_cv_top$gene_name, sig_4_6_0.05=sig_4_6_0.05, DEint=de_intersect_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+
+```
+
+```{r}
+ggvenn::ggvenn(list(DE9sig=DE_9datasets_cv[DE_9datasets_cv$P.Value_avg < 0.05,"gene_name"], sig_4_6_0.05=sig_4_6_0.05, DEint=de_intersect_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+sig9 <- DE_9datasets_cv_top$gene_name
+sig9_0.01 <- DE_9datasets_cv[DE_9datasets_cv$P.Value_avg < 0.01,"gene_name"]
+sig9_0.05 <- DE_9datasets_cv[DE_9datasets_cv$P.Value_avg < 0.05,"gene_name"]
+```
+
+```{r}
+
+```
+
+
+## =========================================================
+
 
 ```{r}
 ggvenn::ggvenn(list(meta=CRT.extrR.markers$Symbol, DE4=rownames(DE_4datasets_scaled),DEall=rownames(DE_alldatasets_scaled)), 
@@ -47,47 +166,276 @@ ggvenn::ggvenn(list(DEbulk=rownames(DE_bulkDatasets_scaled), DE4=rownames(DE_4da
   )
 ```
 
+### CV Pval <= 0.05 and de_intersect 
 ```{r}
-de_intersect_plus_bulk_genes <- intersect(union(rownames(DE_bulkDatasets_scaled),rownames(DE_4datasets_scaled)),rownames(DE_alldatasets_scaled))
-length(de_intersect_plus_bulk_genes)
+ggvenn::ggvenn(list(CV=rownames(DE_6datasets_cv_top), DEint=de_intersect_genes,DEintBulk= de_intersect_plus_bulk_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
 ```
 
 
 ```{r}
-meta_intersect_unionDE <- intersect(CRT.extrR.markers$Symbol, unique(c(rownames(DE_4datasets_scaled), rownames(DE_alldatasets_scaled))))
-de_intersect_genes <- intersect(rownames(DE_4datasets_scaled), rownames(DE_alldatasets_scaled))
+ggvenn::ggvenn(list(DEbulk=rownames(DE_bulkDatasets_scaled), DE4=rownames(DE_4datasets_scaled),DEall=rownames(DE_alldatasets_scaled),CV=rownames(DE_6datasets_cv_top)), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+### CV 300 and de_intersect 
+```{r}
+ggvenn::ggvenn(list(CV300=rownames(DE_6datasets_cv_300), DEint=de_intersect_genes,DEintBulk= de_intersect_plus_bulk_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+
+```{r}
+ggvenn::ggvenn(list(DEbulk=rownames(DE_bulkDatasets_scaled), DE4=rownames(DE_4datasets_scaled),DEall=rownames(DE_alldatasets_scaled),CV300=rownames(DE_6datasets_cv_300)), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+
+```{r}
+ggvenn::ggvenn(list(DEbulk=rownames(DE_bulkDatasets_scaled), DE4=rownames(DE_4datasets_scaled),DEall=rownames(DE_alldatasets_scaled),bulkCV300=rownames(DE_bulkdataset_cv_300)), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
 ```
 
 ```{r}
-saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/meta_intersect_unionDE.rds", meta_intersect_unionDE)
-saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/de_intersect_genes.rds", de_intersect_genes)
-saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/de_intersect_plus_bulk_genes.rds", de_intersect_plus_bulk_genes)
+ggvenn::ggvenn(list(DEbulk=rownames(DE_bulkDatasets_scaled), DE4=rownames(DE_4datasets_scaled),DEall=rownames(DE_alldatasets_scaled),MA5_CV300=rownames(DE_5MAdatasets_cv_300)), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
 ```
+
+```{r}
+ggvenn::ggvenn(list(DEint=de_intersect_genes, CV300=rownames(DE_6datasets_cv_300),MA5_CV300=rownames(DE_5MAdatasets_cv_300),bulkCV300=rownames(DE_bulkdataset_cv_300)), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+```{r}
+querygenes <- setdiff(setdiff(setdiff(de_intersect_genes,rownames(DE_6datasets_cv_300) ), rownames(DE_5MAdatasets_cv_300)),DE_bulkdataset_cv_300 )
+ggvenn::ggvenn(list(DEbulk=rownames(DE_bulkDatasets_scaled), DE4=rownames(DE_4datasets_scaled),DEall=rownames(DE_alldatasets_scaled), query=querygenes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+DE_6datasets_cv$rank <- 1:nrow(DE_6datasets_cv)
+#DE_6datasets_cv[which(rownames(DE_6datasets_cv) %in% de_intersect_genes),]
+summary(DE_6datasets_cv[which(rownames(DE_6datasets_cv) %in% de_intersect_genes),])
+```
+
+```{r}
+DE_5MAdatasets_cv$rank <- 1:nrow(DE_5MAdatasets_cv)
+DE_5MAdatasets_cv[which(rownames(DE_5MAdatasets_cv) %in% de_intersect_genes),]
+summary(DE_5MAdatasets_cv[which(rownames(DE_5MAdatasets_cv) %in% de_intersect_genes),])
+```
+
+```{r}
+DE_5MAdatasets_cv <- DE_5MAdatasets_cv[order(DE_5MAdatasets_cv$P.Value_avg, decreasing = F), ]
+DE_5MAdatasets_cv$rank <- 1:nrow(DE_5MAdatasets_cv)
+#DE_5MAdatasets_cv[which(rownames(DE_5MAdatasets_cv) %in% de_intersect_genes),]
+summary(DE_5MAdatasets_cv[which(rownames(DE_5MAdatasets_cv) %in% de_intersect_genes),])
+```
+
+
+```{r}
+ggvenn::ggvenn(list(DE4=rownames(DE_4MAdatasets_cv_300),DE5=rownames(DE_5MAdatasets_cv_300), DE6=rownames(DE_6datasets_cv_300), DE4bulk=rownames(DE_4MAbulkdatasets_cv_300)), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+ggvenn::ggvenn(list(DE4=rownames(DE_4MAdatasets_cv_300), DE6=rownames(DE_6datasets_cv_300), DEintersect=de_intersect_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+
+```{r}
+ggvenn::ggvenn(list(DE5=rownames(DE_5MAdatasets_cv_300), DE6=rownames(DE_6datasets_cv_300), DEintersect=de_intersect_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+ggvenn::ggvenn(list(DE4=rownames(DE_4MAdatasets_cv[1:1000,]), DE6=rownames(DE_6datasets_cv[1:1000,]),
+                    DEbulk=rownames(DE_bulkdataset_cv[1:1000,]), DEintersect=de_intersect_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+ggvenn::ggvenn(list(DE4=rownames(DE_4MAdatasets_cv[1:1000,]), DE6=rownames(DE_6datasets_cv[1:1000,]), DEintersect=de_intersect_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+final = intersect(rownames(DE_4MAdatasets_cv[1:1000,]), rownames(DE_6datasets_cv[1:1000,]))
+final_int = intersect(final, de_intersect_genes)
+summary(DE_4MAdatasets_cv[final,])
+summary(DE_6datasets_cv[final,])
+summary(DE_4MAdatasets_cv[final_int,])
+summary(DE_6datasets_cv[final_int,])
+summary(DE_4MAdatasets_cv[setdiff(final,final_int),])
+summary(DE_6datasets_cv[setdiff(final,final_int),])
+```
+
+```{r}
+ggvenn::ggvenn(list(final = final[1:400] , DEintersect=de_intersect_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+
+```{r}
+ggvenn::ggvenn(list(DE4=rownames(DE_4MAdatasets_cv[1:500,]), DE6=rownames(DE_6datasets_cv[1:500,]), DEintersect=de_intersect_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+ggvenn::ggvenn(list(DE4_300=rownames(DE_4MAdatasets_cv[1:1000,]),DE4=rownames(DE_4datasets_scaled)), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+```{r}
+ggvenn::ggvenn(list(DE4_300=rownames(DE_4MAdatasets_cv[1:1000,]),DE4=rownames(DE_4datasets_scaled), intersect=de_intersect_genes, BULK=rownames(DE_bulkdataset_cv[1:1000,])), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+
+
+
+```{r}
+#saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/meta_intersect_unionDE.rds", meta_intersect_unionDE)
+#saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/de_intersect_genes.rds", de_intersect_genes)
+#saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/de_intersect_plus_bulk_genes.rds", de_intersect_plus_bulk_genes)
+```
+
+https://www.datacamp.com/tutorial/feature-selection-R-boruta
+
+https://cran.r-project.org/web/packages/Boruta/vignettes/inahurry.pdf
 
 ```{r}
 spe <- readRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/data/GEO_singlecellexperiment.rds")
+spe.boruta <- spe[, which(spe$batch %in% c("GSE150082", "GSE94104", "GSE133057", "GSE93375"))]
+spe.boruta <- spe.boruta[rownames(DE_4MAdatasets_cv[1:1000,]), which(spe.boruta$Response %in% c("yes", "no"))]
+boruta.in <- as.data.frame(t(assay(spe.boruta, 3) ))
+boruta.in$Response <- as.factor(spe.boruta$Response)
+```
+
+
+```{r}
+library(Boruta)
+boruta.out <- Boruta(Response ~ ., boruta.in, maxRuns = 100 )
+boruta.out
+boruta.out.4MA.4MA <- boruta.out
+```
+
+```{r}
+spe.boruta <- spe[, which(spe$batch %in% c("GSE150082", "GSE94104", "GSE133057", "GSE93375", "GSE209746", "GSE145037"))]
+spe.boruta <- spe.boruta[rownames(DE_4MAdatasets_cv[1:1000,]), which(spe.boruta$Response %in% c("yes", "no"))]
+boruta.in <- as.data.frame(t(assay(spe.boruta, 3) ))
+boruta.in$Response <- as.factor(spe.boruta$Response)
+boruta.out <- Boruta(Response ~ ., boruta.in, maxRuns = 100 )
+boruta.out
+boruta.out.4MA.6 <- boruta.out
+```
+
+```{r}
+intersect(names(boruta.out.4MA.4MA$finalDecision[boruta.out.4MA.4MA$finalDecision %in% c("Tentative", "Confirmed")]),
+          names(boruta.out.4MA.6$finalDecision[boruta.out.4MA.6$finalDecision %in% c("Tentative", "Confirmed")]))
+```
+
+
+```{r}
+spe.boruta <- spe[, which(spe$batch %in% c("GSE150082", "GSE94104", "GSE133057", "GSE93375", "GSE209746", "GSE145037"))]
+spe.boruta <- spe.boruta[rownames(DE_6datasets_cv[1:1000,]), which(spe.boruta$Response %in% c("yes", "no"))]
+boruta.in <- as.data.frame(t(assay(spe.boruta, 3) ))
+boruta.in$Response <- as.factor(spe.boruta$Response)
+boruta.out <- Boruta(Response ~ ., boruta.in, maxRuns = 100 )
+boruta.out
+boruta.out.6.6 <- boruta.out
+```
+
+```{r}
+intersect(names(boruta.out.4MA.4MA$finalDecision[boruta.out.4MA.4MA$finalDecision %in% c("Tentative", "Confirmed")]),
+          names(boruta.out.6.6$finalDecision[boruta.out.6.6$finalDecision %in% c("Tentative", "Confirmed")]))
+```
+
+
+```{r}
 keep <- list()
 
 CRT.extrR.markers <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/CRT.extrR.markers.rds")
 keep[["meta"]] <- intersect(CRT.extrR.markers$Symbol,rownames(spe))
 
-DE_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_4datasets_scaled.rds")
+DE_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/V1.0/DE_4datasets_scaled.rds")
 DE_scaled <- DE_scaled[[1]]
 DE_scaled <- DE_scaled %>% filter(P.Value <= 0.05)
 keep[["DE4"]] = rownames(DE_scaled)
 
-DE_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_alldatasets_scaled.rds")
+DE_scaled <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/V1.0/DE_alldatasets_scaled.rds")
 DE_scaled <- DE_scaled[[1]]
 DE_scaled <- DE_scaled %>% filter(P.Value <= 0.05)
 keep[["DEall"]] = rownames(DE_scaled)
 
-keep[["meta_intersect_unionDE"]] = readRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/meta_intersect_unionDE.rds")
+keep[["meta_intersect_unionDE"]] = readRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/V1.0/meta_intersect_unionDE.rds")
 
-keep[["de_intersect"]] = readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/de_intersect_genes.rds")
+keep[["de_intersect"]] = readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/V1.0/de_intersect_genes.rds")
 
-keep[["de_intersect_plus_bulk_genes"]] = readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/de_intersect_plus_bulk_genes.rds") 
+keep[["de_intersect_plus_bulk_genes"]] = readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/V1.0/de_intersect_plus_bulk_genes.rds") 
 
 keep[["5k"]] <- names(sort(rowVars(assay(spe,3)), decreasing = T)[1:5000])
+
+keep[["CV"]] <- DE_6datasets_cv_top$gene_name
+
+keep[["CV300"]] <- DE_6datasets_cv_300$gene_name
+
+keep[["CV300_4MA"]] <- DE_4MAdatasets_cv_300$gene_name
+
+keep[["Boruta_4MA"]] <- names(boruta.out.4MA.4MA$finalDecision[boruta.out.4MA.4MA$finalDecision %in% c("Tentative", "Confirmed")])
+
+keep[["Boruta_6"]] <- names(boruta.out.6.6$finalDecision[boruta.out.4MA.4MA$finalDecision %in% c("Tentative", "Confirmed")])
+
+keep[["CVBig"]] <- names(boruta.out.6.6$finalDecision[boruta.out.4MA.4MA$finalDecision %in% c("Tentative", "Confirmed")])
+
+keep[["final300"]] <- final[1:300]
+
+keep[["final350"]] <- final[1:350]
+
+keep[["final"]] <- final
+
+keep[["sig_4_6_0.05"]] <- sig_4_6_0.05
+
+keep[["sig_4_6_0.1"]] <- sig_4_6_0.1
+
+keep[["sig9_0.05"]] <- sig9_0.05
+
+keep[["sig9_0.01"]] <- sig9_0.01
+
+keep[["sig9"]] <- sig9
 ```
 
 ```{r}
@@ -95,3 +443,23 @@ saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.
 ```
 
 
+```{r}
+ggvenn::ggvenn(list(sig_4_6_0.1=keep[["sig_4_6_0.1"]],final=final, intersect=de_intersect_genes), 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+```
+
+## Compare to public signatures
+
+```{r}
+eBiomed_33genes <- read_csv("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/eBiomed_33genes.csv")
+```
+
+
+```{r}
+for (n in names(keep)) {
+  print(n)  
+  print(intersect(keep[[n]], eBiomed_33genes$Gene.Symbol))
+}
+```

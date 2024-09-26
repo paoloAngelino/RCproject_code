@@ -1,5 +1,5 @@
 ---
-title: "Apply models to GEOmx data"
+title: "Apply models to GEOmx data, signature 4_6_0.05 with gene in GEOmx only"
 author: "Paolo Angelino"
 format: html
 editor: visual
@@ -10,12 +10,13 @@ Load data
 
 ```{r}
 library(readr)
-library(dplyr)
+library(tidyverse)
 GEOMXcohort_pseudobulk_nuclei <- read_csv2("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/GEOMXcohort_pseudobulk_nuclei.csv")
 ```
 
 ```{r}
-test_data <- GEOMXcohort_pseudobulk_nuclei %>% filter(Response != "Mid responders") %>% select(-one_of(c("...1", "Code", "Response"))) 
+test_data <- GEOMXcohort_pseudobulk_nuclei %>% filter(Response != "Mid responders") %>% dplyr::select(-one_of(c("...1", "Code", "Response"))) 
+GEOMXgenes <- colnames(test_data)
 
 response <- GEOMXcohort_pseudobulk_nuclei %>% filter(Response != "Mid responders") %>% pull(Response)
 response <- ifelse(response == "Good responders", "yes", "no")
@@ -26,7 +27,10 @@ Load model
 ```{r}
 #| echo: false
 # models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/randomSampling_modeling_extra_final_de_intersect_plus_bulk_genes_6datasets_scaled.rds")
-models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/randomSampling_modeling_extra_final_DEintersect_6datasets_scaled.rds")
+# models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/extrasets_modeling_extra_final_6datasets_DEintersect.rds")
+models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/extrasets_modeling_extra_final_6datasets_sig_4_6_0.05.rds")
+# models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/extraset_modeling_extra_final_6datasets_GEOMX_4_6_0.05.Rds")
+
 dim(models$gl$trainingData)
 ```
 
@@ -44,6 +48,13 @@ summary(test_data[,1:10])
 #
 ```
 
+```{r}
+# store intersecting genes
+keep <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds")
+keep$GEOMX_4_6_0.05_ <- intersect(keep$sig_4_6_0.05, GEOMXgenes)
+saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds", keep)
+```
+
 
 ## Test
 
@@ -55,6 +66,19 @@ summary(test_data[,1:10])
 
   test_res <- predict(models$rf, newdata =  test_data, type="prob")
   print(pROC::plot.roc(response, test_res$yes, print.auc=TRUE))
+  
+  test_res$obs <- response
+  g <- ggplot(test_res, aes(m=yes, d=obs)) + #factor(obs, levels = c("no", "yes"))
+    geom_roc(n.cuts=0) + 
+    coord_equal() +
+    style_roc()
+  auc_for_plot <- paste("AUC =", format(round((calc_auc(g))$AUC, 4), nsmall=2))
+  g = g + annotate("text", x=0.75, y=0.25, label=auc_for_plot) + ggtitle("Random Forest ROC")
+  print(g)
+  pdf("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/GEOMX_sig_4_6_0.05_RF_ROC.pdf")
+  print(g)
+  dev.off()
+
 
 ```
 
@@ -108,7 +132,7 @@ pointLabel(ump$layout, labels = rownames(ump$layout), method="SANN", cex=0.6)
 gset.bkp <- gset
 ```
 
-### Filter by treatment
+### Filter samples
 
 ```{r}
 dim(gset)
@@ -116,7 +140,7 @@ table(gset$`preoperative radiochemotherapy (rct):ch1`)
 ```
 
 ```{r}
-gset <- gset[,gset$`preoperative radiochemotherapy (rct):ch1` != "5-FU + RT"]
+# gset <- gset[,gset$`preoperative radiochemotherapy (rct):ch1` != "5-FU + RT"]
 gset <- gset[,gset$`tissue:ch1` == "rectal tumor"]
 gset <- gset[,gset$`depth of invasion before rct:ch1` != "NA" & gset$`depth of invasion after rct:ch1` != "NA"]
 ```
@@ -276,7 +300,6 @@ rownames(test_data) <- c(fData(gset)$GENE_SYMBOL, missing_genes)
 
 ```{r}
 eBiomed_33genes <- read_csv("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/eBiomed_33genes.csv")
-keep <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds")
 ```
 
 ```{r}
@@ -286,6 +309,13 @@ for (n in names(keep)) {
 }
 ```
 
+```{r}
+public.sig <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/public.signature.list.Rds")
+```
 
 
+```{r}
+public.sig$sig_4_6_0.05 <- keep$sig_4_6_0.05
+# saveRDS(file="/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/all.signature.list.Rds", public.sig)
+```
 

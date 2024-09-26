@@ -1,0 +1,156 @@
+---
+title: "`r paste0('glmnet and randomForest in R (caret), ', params$title)`"
+author: "Paolo Angelino"
+output:
+  html_document:
+    depth: 2
+    highlight: tango
+    number_sections: yes
+    toc: yes
+params:
+  usescaled: TRUE
+---
+
+```{r}
+library(readr)
+library(dplyr)
+library(textshape)
+Metadata_Training <- read_csv("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/eBioMed_data/Metadata_Training.csv")
+
+Domingo_ebiomedicine_probes <- read_csv("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/eBioMed_data/Domingo_ebiomedicine_probes.csv")
+
+Xcel_na36_annot <- read_csv("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/eBioMed_data/Xcel.na36.annot.csv",
+skip = 25)
+```
+
+```{r}
+dim(Metadata_Training)
+```
+
+```{r}
+dim(Domingo_ebiomedicine_probes)
+```
+
+```{r}
+dim(Xcel_na36_annot)
+```
+
+```{r}
+length(intersect(Metadata_Training$...1, colnames(Domingo_ebiomedicine_probes)))
+```
+
+```{r}
+length(intersect(Xcel_na36_annot$`Probe Set ID`, Domingo_ebiomedicine_probes$Probe.Set.ID))
+```
+
+```{r}
+head(Xcel_na36_annot)
+```
+
+Load model
+
+```{r}
+#| echo: false
+# models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/randomSampling_modeling_extra_final_de_intersect_plus_bulk_genes_6datasets_scaled.rds")
+# models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/V2.0/extrasets_modeling_extra_final_6datasets_DEintersect.rds")
+ models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/V2.0/extrasets_modeling_extra_final_6datasets_sig_4_6_0.05.rds")
+# models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/extraset_modeling_extra_final_6datasets_GEOMX_4_6_0.05.Rds")
+
+dim(models$gl$trainingData)
+```
+
+```{r}
+DE_6Datasets_scaled_2 <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/DE_6Datasets_scaled_2.rds")
+logFCs <- DE_6Datasets_scaled_2 %>% filter(gene_name %in% colnames(models$gl$trainingData)) %>% select(c("gene_name", "logFC"))
+```
+
+```{r}
+length(intersect(colnames(models$gl$trainingData), Xcel_na36_annot$`Gene Symbol`))
+```
+```{r}
+dim(model_probes <- Xcel_na36_annot %>% filter(`Gene Symbol` %in% colnames(models$gl$trainingData)) %>% select(`Gene Symbol`, `Probe Set ID`))
+```
+
+Probes matrix
+
+```{r}
+model_probes_mat <- Domingo_ebiomedicine_probes %>% filter(Probe.Set.ID %in% model_probes$`Probe Set ID`) %>% column_to_rownames("Probe.Set.ID")
+dim(model_probes_mat)
+```
+
+Probes Heatmap
+
+```{r}
+library(nclust)
+
+rownames(Metadata_Training) <- Metadata_Training$...1
+mrtag=make_tag(Metadata_Training, varnames=c("response"),cols=c("green3"))
+names(mrtag) <- unique(Metadata_Training$response)
+mrtag <- mrtag[,order(colnames(mrtag))]  
+
+X <- scale(t(scale(as.matrix(model_probes_mat)[,rownames(Metadata_Training)])))
+head(colnames(X))
+coldmap(X, rtag = mrtag, method = "ward") 
+```
+
+
+Probes PCA
+
+```{r}
+library(ggfortify)
+pca_res <- prcomp(X, scale. = TRUE)
+dim(pca_res$x)
+autoplot(pca_res, data = Metadata_Training[rownames(X),], colour = "response")
+
+```
+
+```{r}
+pca_res <- prcomp(t(X), scale. = TRUE)
+model_probes$GeneSymbol <- model_probes$`Gene Symbol`
+autoplot(pca_res, data = model_probes, colour = "GeneSymbol") + guides(col="none")
+```
+```{r}
+resp <- ifelse(Metadata_Training$response == "responder", 1, 0)
+names(resp) <- Metadata_Training$...1
+summary(cors <-cor(X, resp[rownames(X)]))
+names(cors) <- colnames(X)
+probes <- character(length(unique(model_probes$`Gene Symbol`)))
+names(probes) <- unique(model_probes$`Gene Symbol`)
+for(n in unique(model_probes$`Gene Symbol`) ){
+  cors_tmp <- cors[model_probes %>% filter(`Gene Symbol` == n) %>% pull(var="Probe Set ID")]
+  if(logFCs[n,"logFC"] >0 ) {
+    probes[n] <- names(cors_tmp)[which(cors_tmp == max(cors_tmp) )]
+  } else {
+    probes[n] <- names(cors_tmp)[which(cors_tmp == min(cors_tmp) )]
+  }
+}
+```
+
+
+```{r}
+X <- scale(t(scale(as.matrix(model_probes_mat[probes,]))))
+head(colnames(X))
+colnames(X) <- names(probes)
+coldmap(X[rownames(mrtag),], rtag = mrtag, method = "ward") 
+```
+
+```{r}
+pca_res <- prcomp(X, scale. = TRUE)
+dim(pca_res$x)
+autoplot(pca_res, data = Metadata_Training[rownames(X),], colour = "response")
+```
+
+## Test
+
+
+```{r}
+  test_res <- predict(models$gl, newdata =X, type="prob")
+  colnames(test_res) = c("nonresponder", "responder")
+  print(pROC::plot.roc(Metadata_Training[rownames(X),]  %>% pull(var="response"), test_res$responder, print.auc=TRUE))
+
+
+  test_res <- predict(models$rf, newdata =X, type="prob")
+  colnames(test_res) = c("nonresponder", "responder")
+  print(pROC::plot.roc(Metadata_Training[rownames(X),]  %>% pull(var="response"), test_res$responder, print.auc=TRUE))
+
+```
