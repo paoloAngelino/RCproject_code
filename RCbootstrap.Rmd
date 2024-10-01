@@ -1,0 +1,651 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Load packages
+```{r}
+library(rsample)
+require(variancePartition)
+library(DESeq2)
+library(edgeR)
+
+library(tibble)
+library(tidyverse)
+library(dplyr)
+library(stats)
+require(BiocParallel)
+```
+
+work path:
+/home/melirapti/Rectal/Analysis/Main/Code&Plots/Scripts
+
+Load data
+```{r}
+# Input data ----
+GMx.data2 <- readRDS("/export/scratch/pangelin/HUG/RC_project/bothCohorts.T.S.rds")
+
+table(GMx.data2$Response)
+table(GMx.data2$segment)
+table(GMx.data2$cohort)
+```
+
+Remove middle responders, and rename localization
+```{r}
+GMx.data2 <- GMx.data2 %>% dplyr::filter(Response !='mid-pCR')
+GMx.data2 <- GMx.data2 %>% dplyr::mutate(Localization=gsub("CK+", 'tumor',gsub("CK-", 'stroma', `segment`))) %>%
+  dplyr::mutate(Localization=gsub("[+]", '',`Localization`))
+my_table <- data.frame(sample=rownames(GMx.data2), response=GMx.data2$Response, segment=GMx.data2$segment)
+knitr::kable(my_table[order(my_table$sample),])
+
+my_data <- tibble::rownames_to_column(GMx.data2, "Sample")# %>% dplyr::filter(Response !='mid-pCR') 
+```
+
+Prepare bootstraps
+```{r}
+# my_data$combo <- paste(my_data$Response,my_data$segment,sep = "x")
+# set.seed(13)
+# resampl <- bootstraps(my_data, times = 5, strata = combo)
+# for (n in 1:nrow(resampl)) {
+#   x <- analysis(resampl$splits[[n]])
+#   print(table(x$Response))
+#   print(table(x$segment))
+# }
+
+
+my_data$patient <- substr(my_data$Sample, start=1, stop = 10)
+
+my_table <- data.frame(sample=my_data$Sample, response=my_data$Response, segment=my_data$segment, patient=my_data$patient)
+knitr::kable(my_table[order(my_table$sample),])
+
+my_table <- my_table[!duplicated(my_table$patient),]
+knitr::kable(my_table[order(my_table$sample),])
+
+
+set.seed(13)
+resampl <- bootstraps(my_table, times = 5, strata = response)
+for (n in 1:nrow(resampl)) {
+  x <- analysis(resampl$splits[[n]])
+  print(table(x$response))
+  print(table(x$segment))
+}
+```
+
+DE function, run with Cohor covariate
+```{r}
+DE_results <- function(split_df, boot_id){
+  
+  split_df$Sample <- make.unique(split_df$Sample)
+  
+  # create annotation
+  sample.desc <- data.frame(Response=split_df$Response, Localization=split_df$Localization, Cohort=split_df$cohort, Patient=split_df$patient)
+  
+  
+  # Sample --> rownames
+  split_df <- split_df %>% remove_rownames %>% column_to_rownames(var="Sample")
+  row.names(sample.desc) <- rownames(split_df)
+  
+  sample.desc$Response <-factor(sample.desc$Response, levels = c("non-pCR", "pCR"))
+  sample.desc$Localization <-factor(sample.desc$Localization, levels = c("tumor", "stroma"))
+  sample.desc$Cohort <-factor(sample.desc$Cohort, levels = c("discovery", "validation"))
+  
+  # remove Response
+  split_df$Response <- NULL
+  split_df$segment <- NULL
+  split_df$cohort <- NULL
+  split_df$Localization <- NULL
+  split_df$patient <- NULL
+  
+  test1 <- 2^(split_df)
+  test <- as.data.frame(t(test1))
+  
+  print(all(rownames(sample.desc) == colnames(test))) # has to be TRUE
+
+  # The variable to be tested must be a fixed effect
+  # form <- ~ Response + Localization + Cohort + Response:Localization
+  # print(colnames(model.matrix(form, data=colData(dds))))
+
+  # Combining the variables is more easy to interpret, instead of using an interaction term
+  sample.desc$combined <- paste(sample.desc$Response, sample.desc$Localization, sep = ".")
+  
+  # DEseq design is not relevant, as DGE is run through dream
+  form.deseq <- ~ 0 + combined + Cohort 
+  
+  colnames(model.matrix(form.deseq, data=sample.desc))
+  
+  dds <- DESeqDataSetFromMatrix(countData = round(test), 
+                                colData = sample.desc,
+                                design = form.deseq
+                                #design = ~ Response + Localization + Cohort + Response:Localization
+                                #design = ~Localization + Response + Cohort + Localization:Response
+  )
+
+  dge <- DEFormats::as.DGEList(dds)
+  dge = calcNormFactors(dge)
+  cdata <- colData(dds)
+
+  # if using Patient, remove Cohort, as it depends linearly on Patient 
+  form.dream <- ~ 0 + combined + (1|Patient)
+  
+  # DREAM
+  # Specify parallel processing parameters
+  # this is used implicitly by dream() to run in parallel
+  param = SnowParam(24, "SOCK", progressbar=TRUE)
+
+  L = makeContrastsDream( form.dream, data=cdata,
+                          contrasts = c(interaction = "(combinedpCR.stroma-`combinednon-pCR.stroma`)-(combinedpCR.tumor-`combinednon-pCR.tumor`)",
+                                        response_both = "(combinedpCR.stroma+combinedpCR.tumor)-(`combinednon-pCR.stroma`+`combinednon-pCR.tumor`)",
+                                        response_in_stroma ="combinedpCR.stroma-`combinednon-pCR.stroma`",
+                                        response_in_tumor = "combinedpCR.tumor-`combinednon-pCR.tumor`",
+                                        tumor_vs_stroma = "(combinedpCR.tumor+`combinednon-pCR.tumor`)-(combinedpCR.stroma+`combinednon-pCR.stroma`)")
+                          )
+  print(L)
+  # estimate weights using linear mixed model of dream
+  vobjDream = voomWithDreamWeights( dge, form.dream, data=cdata, BPPARAM=param )
+  
+  # Fit the dream model on each gene
+  # By default, uses the Satterthwaite approximation for the hypothesis test
+  fitmm = dream( vobjDream, form.dream, data=cdata, L)
+  
+  fitmm = variancePartition::eBayes(fitmm)
+  print(head(fitmm$design))
+  print(head(fitmm$coefficients))
+  
+  # change to BH method
+  dge.interaction <- variancePartition::topTable( fitmm, coef="interaction", sort.by = "P", adjust.method = "BH", number = 20000) # number = 1000, p.value = 0.01
+  # dge.interaction <- topTable( fitmm, coef="interaction", sort.by = "P", adjust.method = "BH", number = 20000) # number = 1000, p.value = 0.01
+  
+  saveRDS(fitmm, paste0('/export/scratch/pangelin/HUG/RC_project/analysis/results/bothCohorts_fitmm',
+  boot_id,'.rds'))
+  # Variance Partition
+  # dds <- estimateSizeFactors(dds)
+  # dds <- estimateDispersionsGeneEst(dds)
+  # dispersions(dds) <- mcols(dds)$dispGeneEst
+  # dds <- nbinomWaldTest(dds)
+  # res <- results(dds)
+  
+  quantLog <- assay( vst( dds , fitType = "local", blind = F))
+
+  # Define formula
+  cdata <- colData(dds)
+  # if using Patient, remove Cohort, as it depends linearly on Patient
+  form.vp <- ~ (1|Response) + (1|Localization) + (1|Response:Localization) + (1|Patient)
+
+  # Run variancePartition analysis
+  varPart <- fitExtractVarPartModel( quantLog, form.vp, cdata)
+
+  vp <- sortCols( varPart,  )
+
+  # Overlap of two result lists
+  # ovrl <- data.frame(Overlap=intersect(rownames(vp[order(vp$`Response:Localization`, decreasing = T), ][1:30,]), rownames(dge.interaction[1:30,])))
+  # print(dim(ovrl))
+
+  results_list <- list(dge.interaction, vp)
+  return(results_list)
+}
+```
+
+Run bootstrap
+```{r, warning=FALSE, eval=FALSE}
+# Bootstrap ----
+# For each split: find DE genes with DREAM and vP 
+resampl_list <- list()
+
+shift <- 0
+
+
+#for (i in 1:dim(resampl)[[1]]{
+for (i in seq(1, length(resampl[[1]]))){
+  x <- analysis(resampl$splits[[i]])
+  
+  y=list()
+  
+  for (p in 1:nrow(x)) {
+    y[[p]] <- my_data[which(my_data$patient %in% x[p,"patient"]),]
+    
+  }
+  y = do.call(rbind, y)
+  
+  print("#############################################")
+  print(paste("BOOTSTRAP", i))
+  print(table(y$segment))
+  print(table(y$Response))
+  print(table(y$cohort))
+  print(table(y$Localization))
+  dream_results <- DE_results(y, i)
+  
+  resampl_list <- append(resampl_list, dream_results)
+  
+  names(resampl_list)[i+shift] <- paste("dream", i, sep = "_")
+  names(resampl_list)[i+shift+1] <- paste("variancePartition", i, sep = "_")
+
+  shift <- shift + 1
+}
+```
+
+```{r, eval=FALSE}
+saveRDS(resampl_list, '/export/scratch/pangelin/HUG/RC_project/analysis/results/bothCohorts_resampl_list_BH.rds')
+```
+
+
+```{r, eval=TRUE}
+# library(modeldata)
+# data(wa_churn)
+# 
+# data(ames, package = "modeldata")
+# View(ames)
+# res <- bootstraps(ames, times = 5, strata = Lot_Shape)
+# y <- analysis(res$splits[[1]])
+
+
+# Confirm the balancing: length(which(x$Response=='non-pCR'))
+
+
+# saveRDS(resampl_list, '/home/melirapti/Rectal/Analysis/Main/Code&Plots/rds/bothCohorts_resampl_list.rds')
+# saveRDS(resampl_list, '/export/scratch/pangelin/HUG/RC_project/analysis/results/bothCohorts_resampl_list_BH.rds')
+# resampl_list <- list()
+# for (i in 1:dim(resampl)[[1]]){
+#   print (i)
+#   test <- i
+#   resampl_list <- append(resampl_list, i)
+# }
+resampl_list <- readRDS('/export/scratch/pangelin/HUG/RC_project/analysis/results/bothCohorts_resampl_list_BH.rds')
+
+
+# Genes ----
+# Intersect of DREAM results across bootstrap - significative genes
+k=1
+for (i in 1:length(resampl_list)){
+  if ((i %% 2) != 0) {
+    print (i)
+    # filter for significance
+    resampl_list[[i]] <- resampl_list[[i]][resampl_list[[i]]$adj.P.Val<0.05,]
+    
+    # order by p.adj again (to be sure)
+    resampl_list[[i]] <- resampl_list[[i]][order(resampl_list[[i]]$adj.P.Val),]
+    
+    # add bootstrap number in columns
+    names(resampl_list[[i]]) <- paste(names(resampl_list[[i]]), k, sep = '_')
+    
+    # add gene name
+    resampl_list[[i]] <- resampl_list[[i]] %>% mutate(Gene = rownames(resampl_list[[i]]))
+    
+    # add rank
+    resampl_list[[i]] <- tibble::rowid_to_column(resampl_list[[i]], paste("Rank",k,sep = '_'))
+    #assign(paste0("df", i), resampl_list[[i]][resampl_list[[i]]$adj.P.Val<0.05,])
+    assign(paste0("df", i), resampl_list[[i]])
+    
+    print(nrow( resampl_list[[i]] ))
+    k= k + 1
+    
+  }
+}
+length(Reduce(intersect, list(df1$Gene, df3$Gene, df5$Gene, df7$Gene, df9$Gene)))
+
+
+# check scores in bootstraps (table: adj.p.val & logFC & ranking)
+list_df = list(df1,df3,df5,df7,df9)
+df.ALL <- list_df %>% 
+  reduce(inner_join, by='Gene') %>% 
+  dplyr::select(contains(c("logFC", "adj.P.Val", "Rank", "Gene"))) %>%
+  column_to_rownames(var="Gene")
+
+saveRDS(df.ALL, '/export/scratch/pangelin/HUG/RC_project/analysis/results/bothCohorts_final_genes.rds')
+df.ALL <- readRDS('/export/scratch/pangelin/HUG/RC_project/analysis/results/bothCohorts_final_genes.rds')
+write.csv(df.ALL, "/export/scratch/pangelin/HUG/RC_project/analysis/results//top_geomx_genes.csv", row.names=TRUE)
+df.ALL_interaction <- df.ALL
+
+as_tibble(df.ALL, rownames = "Gene")
+```
+
+
+```{r, eval=TRUE}
+# variance partition
+
+# ovrl1 <- data.frame(Overlap = intersect(rownames(resampl_list1[[1]])[1:50], rownames(resampl_list1[[2]][order(resampl_list1[[2]]$`Response:Localization`, decreasing = T), ][1:50,])))
+# ovrl2 <- data.frame(Overlap = intersect(rownames(resampl_list[[3]])[1:20], rownames(resampl_list[[4]][order(resampl_list[[4]]$`Response:Localization`, decreasing = T), ][1:20,])))
+# ovrl3 <- data.frame(Overlap = intersect(rownames(resampl_list[[5]])[1:20], rownames(resampl_list[[6]][order(resampl_list[[6]]$`Response:Localization`, decreasing = T), ][1:20,])))
+# ovrl4 <- data.frame(Overlap = intersect(rownames(resampl_list[[7]])[1:20], rownames(resampl_list[[8]][order(resampl_list[[8]]$`Response:Localization`, decreasing = T), ][1:20,])))
+# ovrl5 <- data.frame(Overlap = intersect(rownames(resampl_list[[9]])[1:20], rownames(resampl_list[[10]][order(resampl_list[[10]]$`Response:Localization`, decreasing = T), ][1:20,])))
+
+
+
+# Intersect of vP results across bootstrap - above genes that explain eg.30% of variance
+for (i in 1:length(resampl_list)){
+  if ((i %% 2) == 0) {
+    print (i)
+    assign(paste0("vp", i), resampl_list[[i]][resampl_list[[i]]$`Response:Localization`>=0.2,])
+  }
+}
+length(Reduce(intersect, list(rownames(vp2), rownames(vp4), rownames(vp6), rownames(vp8), rownames(vp10))))
+
+```
+
+```{r}
+length(intersect(rownames(vp2), df1$Gene))
+```
+```{r}
+length(intersect(rownames(vp4), df3$Gene))
+```
+```{r}
+length(intersect(rownames(vp6), df5$Gene))
+```
+```{r}
+length(intersect(rownames(vp8), df7$Gene))
+```
+
+
+```{r}
+
+  resampl_both <- list()
+  resampl_stroma <- list()
+  resampl_tumor <- list()
+  resampl_tumor_vs_stroma <- list()
+  for (boot_id in 1:5) {
+      fitmm <- readRDS(paste0('/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/bothCohorts_fitmm', boot_id,'.rds'))
+      resampl_both[[boot_id]] <- variancePartition::topTable( fitmm, coef="response_both", sort.by = "P", adjust.method = "BH", number = 10005) # number = 1000, p.value = 0.01
+      resampl_stroma[[boot_id]] <- variancePartition::topTable( fitmm, coef="response_in_stroma", sort.by = "P", adjust.method = "BH", number = 10005) # number = 1000, p.value = 0.01
+      resampl_tumor[[boot_id]] <- variancePartition::topTable( fitmm, coef="response_in_tumor", sort.by = "P", adjust.method = "BH", number = 10005) # number = 1000, p.value = 0.01 
+      resampl_tumor_vs_stroma[[boot_id]] <- variancePartition::topTable( fitmm, coef="tumor_vs_stroma", sort.by = "P", adjust.method = "BH", number = 10005) # number = 1000, p.value = 0.01 
+  }
+```
+
+
+```{r}
+# Genes ----
+# Intersect of DREAM results across bootstrap - significative genes
+k=1
+for (i in 1:length(resampl_both)){
+    print (i)
+    # filter for significance
+    resampl_both[[i]] <- resampl_both[[i]][resampl_both[[i]]$P.Val<1,] # adj.P.Val
+    
+    # order by p.adj again (to be sure)
+    resampl_both[[i]] <- resampl_both[[i]][order(resampl_both[[i]]$adj.P.Val),]
+    
+    # add bootstrap number in columns
+    names(resampl_both[[i]]) <- paste(names(resampl_both[[i]]), k, sep = '_')
+    
+    # add gene name
+    resampl_both[[i]] <- resampl_both[[i]] %>% mutate(Gene = rownames(resampl_both[[i]]))
+    
+    # add rank
+    resampl_both[[i]] <- tibble::rowid_to_column(resampl_both[[i]], paste("Rank",k,sep = '_'))
+    #assign(paste0("df", i), resampl_both[[i]][resampl_both[[i]]$adj.P.Val<0.05,])
+    assign(paste0("df", i), resampl_both[[i]])
+    
+    print(nrow(resampl_both[[i]]))
+    k= k + 1
+    
+}
+length(Reduce(intersect, list(df1$Gene, df2$Gene, df3$Gene, df4$Gene, df5$Gene)))
+
+
+# check scores in bootstraps (table: adj.p.val & logFC & ranking)
+list_df = list(df1,df2,df3,df4,df5)
+df.ALL <- list_df %>% 
+  purrr::reduce(inner_join, by='Gene') %>% 
+  dplyr::select(contains(c("logFC", "adj.P.Val", "Rank", "Gene"))) %>%
+  column_to_rownames(var="Gene")
+
+saveRDS(df.ALL, '/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/bothCohorts_response_genes.rds')
+#df.ALL <- readRDS('/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/bothCohorts_response_genes.rds')
+write.csv(df.ALL, "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/top_geomx_response_genes.csv", row.names=TRUE)
+
+knitr::kable(head(df.ALL, 50))
+```
+
+
+```{r}
+# Genes ----
+# Intersect of DREAM results across bootstrap - significative genes
+k=1
+for (i in 1:length(resampl_tumor)){
+    print (i)
+    # filter for significance
+    resampl_tumor[[i]] <- resampl_tumor[[i]][resampl_tumor[[i]]$adj.P.Val<1,] # 
+    
+    # order by p.adj again (to be sure)
+    resampl_tumor[[i]] <- resampl_tumor[[i]][order(resampl_tumor[[i]]$adj.P.Val),]
+    
+    # add bootstrap number in columns
+    names(resampl_tumor[[i]]) <- paste(names(resampl_tumor[[i]]), k, sep = '_')
+    
+    # add gene name
+    resampl_tumor[[i]] <- resampl_tumor[[i]] %>% mutate(Gene = rownames(resampl_tumor[[i]]))
+    
+    # add rank
+    resampl_tumor[[i]] <- tibble::rowid_to_column(resampl_tumor[[i]], paste("Rank",k,sep = '_'))
+    #assign(paste0("df", i), resampl_tumor[[i]][resampl_tumor[[i]]$adj.P.Val<0.05,])
+    assign(paste0("df", i), resampl_tumor[[i]])
+    
+    k= k + 1
+    
+}
+length(Reduce(intersect, list(df1$Gene, df2$Gene, df3$Gene, df4$Gene, df5$Gene)))
+
+
+# check scores in bootstraps (table: adj.p.val & logFC & ranking)
+list_df = list(df1,df2,df3,df4,df5)
+df.ALL_tumor <- list_df %>% 
+  purrr::reduce(inner_join, by='Gene') %>% 
+  dplyr::select(contains(c("logFC", "adj.P.Val", "P.Value", "Rank", "Gene"))) %>%
+  column_to_rownames(var="Gene")
+
+saveRDS(df.ALL_tumor, '/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/bothCohorts_response_tumor_genes.rds')
+#df.ALL_tumor <- readRDS('/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/bothCohorts_response_tumor_genes.rds')
+write.csv(df.ALL_tumor, "//data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/top_geomx_response_tumor_genes.csv", row.names=TRUE)
+
+# knitr::kable(df.ALL_tumor)
+```
+
+
+```{r}
+# Genes ----
+# Intersect of DREAM results across bootstrap - significative genes
+k=1
+for (i in 1:length(resampl_stroma)){
+    print (i)
+    # filter for significance
+    resampl_stroma[[i]] <- resampl_stroma[[i]][resampl_stroma[[i]]$adj.P.Val<1,] # 
+    
+    # order by p.adj again (to be sure)
+    resampl_stroma[[i]] <- resampl_stroma[[i]][order(resampl_stroma[[i]]$adj.P.Val),]
+    
+    # add bootstrap number in columns
+    names(resampl_stroma[[i]]) <- paste(names(resampl_stroma[[i]]), k, sep = '_')
+    
+    # add gene name
+    resampl_stroma[[i]] <- resampl_stroma[[i]] %>% mutate(Gene = rownames(resampl_stroma[[i]]))
+    
+    # add rank
+    resampl_stroma[[i]] <- tibble::rowid_to_column(resampl_stroma[[i]], paste("Rank",k,sep = '_'))
+    #assign(paste0("df", i), resampl_stroma[[i]][resampl_stroma[[i]]$adj.P.Val<0.05,])
+    assign(paste0("df", i), resampl_stroma[[i]])
+    
+    k= k + 1
+    
+}
+length(Reduce(intersect, list(df1$Gene, df2$Gene, df3$Gene, df4$Gene, df5$Gene)))
+
+
+# check scores in bootstraps (table: adj.p.val & logFC & ranking)
+list_df = list(df1,df2,df3,df4,df5)
+df.ALL_stroma <- list_df %>% 
+  purrr::reduce(inner_join, by='Gene') %>% 
+  dplyr::select(contains(c("logFC", "adj.P.Val", "P.Value", "Rank", "Gene"))) %>%
+  column_to_rownames(var="Gene")
+
+saveRDS(df.ALL, '/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/bothCohorts_response_stroma_genes.rds')
+#df.ALL <- readRDS('/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/bothCohorts_response_stroma_genes.rds')
+write.csv(df.ALL, "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/top_geomx_response_stroma_genes.csv", row.names=TRUE)
+
+# knitr::kable(df.ALL)
+```
+
+## tumor vs stroma, no pvalue filtering for GSEA
+
+```{r}
+# Genes ----
+# Intersect of DREAM results across bootstrap - significative genes
+k=1
+for (i in 1:length(resampl_tumor_vs_stroma)){
+    print (i)
+    # filter for significance
+    # resampl_tumor_vs_stroma[[i]] <- resampl_tumor_vs_stroma[[i]][resampl_tumor_vs_stroma[[i]]$adj.P.Val<0.01,] # 
+
+    # order by p.adj again (to be sure)
+    resampl_tumor_vs_stroma[[i]] <- resampl_tumor_vs_stroma[[i]][order(resampl_tumor_vs_stroma[[i]]$adj.P.Val),]
+    
+    # add bootstrap number in columns
+    names(resampl_tumor_vs_stroma[[i]]) <- paste(names(resampl_tumor_vs_stroma[[i]]), k, sep = '_')
+    
+    # add gene name
+    resampl_tumor_vs_stroma[[i]] <- resampl_tumor_vs_stroma[[i]] %>% mutate(Gene = rownames(resampl_tumor_vs_stroma[[i]]))
+    
+    # add rank
+    resampl_tumor_vs_stroma[[i]] <- tibble::rowid_to_column(resampl_tumor_vs_stroma[[i]], paste("Rank",k,sep = '_'))
+    #assign(paste0("df", i), resampl_tumor_vs_stroma[[i]][resampl_tumor_vs_stroma[[i]]$adj.P.Val<0.05,])
+    assign(paste0("df", i), resampl_tumor_vs_stroma[[i]])
+    
+    k= k + 1
+    
+}
+length(Reduce(intersect, list(df1$Gene, df2$Gene, df3$Gene, df4$Gene, df5$Gene)))
+
+
+# check scores in bootstraps (table: adj.p.val & logFC & ranking)
+list_df = list(df1,df2,df3,df4,df5)
+df.ALL <- list_df %>% 
+  reduce(inner_join, by='Gene') %>% 
+  dplyr::select(contains(c("logFC", "adj.P.Val", "Rank", "Gene"))) %>%
+  column_to_rownames(var="Gene")
+```
+
+
+
+### Summary of the GSEA analysis
+
+```{r}
+# we want the log2 fold change 
+log_columns <- grep("logFC", names(df.ALL), value = T)
+original_gene_list <- rowMeans(df.ALL[,log_columns])
+
+# name the vector
+names(original_gene_list) <- rownames(df.ALL)
+
+# omit any NA values 
+gene_list<-na.omit(original_gene_list)
+
+# rename with entrez
+entrez_ids <- clusterProfiler::bitr(names(gene_list), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+rownames(entrez_ids) <- entrez_ids$SYMBOL
+gene_list <- gene_list[entrez_ids$SYMBOL]
+names(gene_list) <- entrez_ids[names(gene_list),"ENTREZID"]
+
+# sort the list in decreasing order (required for clusterProfiler)
+gene_list = sort(gene_list, decreasing = TRUE)
+```
+
+```{r}
+require(ReactomePA)
+
+gse_y <- gsePathway(gene_list, 
+                pvalueCutoff = 0.01,
+                pAdjustMethod = "BH", 
+                verbose = FALSE)
+head(gse_y)
+
+gse_y_summary <- as_tibble(fortify(gse_y, showCategory = 100))
+
+# DT::datatable(gse_y_summary %>% dplyr::select(pvalue, p.adjust, setSize, Count, GeneRatio, .sign, core_enrichment) ) 
+#write_csv(file = "/export/scratch/pangelin/HUG/AML_RNAseq/GSEA_tables/CEBPA_down.csv", gse_y_summary %>% dplyr::select(ID, pvalue,
+write_csv(file = "/export/scratch/pangelin/HUG/RC_project/analysis/results//top_geomx_tumor_vs_stroma_pathways.csv", gse_y_summary %>% dplyr::select(ID, Description, pvalue, p.adjust, setSize, Count, GeneRatio, .sign, core_enrichment))
+
+```
+
+'Count' is the number of core enrichment genes, 'setSize' is the count of pathway genes
+The Gene Ratio is:
+(count of core enrichment genes) / (count of pathway genes).
+
+```{r, fig.width=10, fig.height=15}
+require(DOSE)
+library(enrichplot)
+dotplot(gse_y, showCategory=20, split=".sign") + facet_grid(.~.sign) + scale_y_discrete(labels=function(x) str_wrap(x, width=40))
+```
+
+## Filter tumor vs stroma at pval < 0.01
+
+```{r}
+# Genes ----
+# Intersect of DREAM results across bootstrap - significative genes
+k=1
+for (i in 1:length(resampl_tumor_vs_stroma)){
+    print (i)
+    # filter for significance
+    resampl_tumor_vs_stroma[[i]] <- resampl_tumor_vs_stroma[[i]][resampl_tumor_vs_stroma[[i]]$adj.P.Val<0.01,] # 
+    #assign(paste0("df", i), resampl_tumor_vs_stroma[[i]][resampl_tumor_vs_stroma[[i]]$adj.P.Val<0.05,])
+    assign(paste0("df", i), resampl_tumor_vs_stroma[[i]])
+    
+    k= k + 1
+    
+}
+length(Reduce(intersect, list(df1$Gene, df2$Gene, df3$Gene, df4$Gene, df5$Gene)))
+
+
+# check scores in bootstraps (table: adj.p.val & logFC & ranking)
+list_df = list(df1,df2,df3,df4,df5)
+df.ALL <- list_df %>% 
+  reduce(inner_join, by='Gene') %>% 
+  dplyr::select(contains(c("logFC", "adj.P.Val", "Rank", "Gene"))) %>%
+  column_to_rownames(var="Gene")
+
+
+saveRDS(df.ALL, '/export/scratch/pangelin/HUG/RC_project/analysis/results/bothCohorts_tumor_vs_stroma_genes.rds')
+df.ALL <- readRDS('/export/scratch/pangelin/HUG/RC_project/analysis/results/bothCohorts_tumor_vs_stroma_genes.rds')
+write.csv(df.ALL, "/export/scratch/pangelin/HUG/RC_project/analysis/results//top_geomx_tumor_vs_stroma_genes.csv", row.names=TRUE)
+
+df.ALL$Gene <- 
+as_tibble(df.ALL)
+```
+
+# Compare lists
+
+```{r}
+df.ALL.Ronly <- readRDS('/export/scratch/pangelin/HUG/RC_project/bothCohorts_final_genes_ResponseOnly_NEW.rds')
+
+# GeoMx genes (localization & response)
+df.ALL <- readRDS('/export/scratch/pangelin/HUG/RC_project/bothCohorts_final_genes_BH_NEW.rds')
+
+```
+
+
+```{r}
+av.df <- data.frame(tumor_logFC = rowMeans(df.ALL_tumor[rownames(df.ALL),1:5]),
+                    tumor_adjP = rowMeans(df.ALL_tumor[rownames(df.ALL),6:10]),
+                    tumor_Pvalue = rowMeans(df.ALL_tumor[rownames(df.ALL),11:15]),
+                    stroma_logFC = rowMeans(df.ALL_stroma[rownames(df.ALL),1:5]),
+                    stroma_adjP = rowMeans(df.ALL_stroma[rownames(df.ALL),6:10]),
+                    stroma_Pvalue = rowMeans(df.ALL_stroma[rownames(df.ALL),11:15]),
+                    gene = rownames(df.ALL))
+
+as_tibble(av.df)
+```
+```{r}
+summary.df <- data.frame(
+  gene = av.df$gene,
+  direction_in_tumor = ifelse(av.df$tumor_logFC>=0,"+", "-"),
+  direction_in_stroma = ifelse(av.df$stroma_logFC>=0,"+", "-"),
+  significative_in_tumor = ifelse(av.df$tumor_Pvalue<0.1,"yes", "no"),
+  significative_in_stroma = ifelse(av.df$stroma_Pvalue<0.1,"yes", "no")
+  #row.names = av.df$gene
+)
+as_tibble(summary.df)
+```
+
+```{r,results='asis'}
+knitr::kable(summary.df)
+```
+
+
+

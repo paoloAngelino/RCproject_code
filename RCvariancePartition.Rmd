@@ -1,0 +1,181 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+require(variancePartition)
+require(DESeq2)
+```
+
+```{r}
+dds <- readRDS("/home/melirapti/Rectal/Analysis/Main/Code&Plots/rds/GMx DE/dds.rds")
+```
+
+```{r}
+sizeFactors(dds)
+```
+
+```{r}
+# identify genes that pass expression cutoff
+isexpr <- rowSums(fpm(dds)>1) >= 0.5 * ncol(dds)
+length(which(isexpr))
+```
+
+```{r}
+quantLog <- assay( vst( dds , fitType = "local"))
+```
+
+```{r}
+# Define formula
+info <- colData(dds)
+form <- ~ (1|Response) + (1|Localization)
+```
+
+```{r}
+# Run variancePartition analysis
+varPart <- fitExtractVarPartModel( quantLog, form, info)
+```
+
+```{r}
+vp <- sortCols( varPart )
+# Figure 1a
+# Bar plot of variance fractions for the first 10 genes
+plotPercentBars( vp[1:10,] )
+#
+# Figure 1b
+# violin plot of contribution of each variable to total variance
+plotVarPart( vp )
+
+```
+
+
+
+```{r}
+# Define formula
+form2 <- ~ (1|Response) + (1|Localization) + (1|Response:Localization)
+```
+
+```{r}
+# Run variancePartition analysis
+varPart2 <- fitExtractVarPartModel( quantLog, form2, info)
+```
+
+
+```{r}
+vp2 <- sortCols( varPart2 )
+# Figure 1a
+# Bar plot of variance fractions for the first 10 genes
+top20 <- order(vp2$`Response:Localization`, decreasing = T)[1:50]
+plotPercentBars( vp2[top20[1:20],] )
+#
+# Figure 1b
+# violin plot of contribution of each variable to total variance
+plotVarPart( vp2 )
+```
+
+```{r}
+p <- list()
+for(i in top20[1:20]){
+label <- paste("Response:Localization interaction", format(varPart2$`Response:Localization`[i]*100, digits=3), "%")
+GE <- data.frame( Expression = quantLog[i,], Localization = info$Localization, Response = info$Response,
+                  ResponseByLocalization = as.factor(paste0(info$Localization,"_",info$Response)))
+main <- rownames(quantLog)[i]
+# plotStratify( Expression ~ Localization, GE, colorBy=NULL, text=label, main=main)
+# label <- paste("Response:", format(varPart$Response[i]*100, digits=3), "%")
+# plotStratify( Expression ~ Response, GE, colorBy=NULL, text=label, main=main)
+# col = c( "green", "red", "yellow", "blue")
+# names(col) <- levels(as.factor(GE$ResponseByLocalization))
+#plotStratify( Expression ~ ResponseByLocalization, GE, colorBy="ResponseByLocalization", main=main)
+print(p[[rownames(quantLog)[i]]] <- plotStratify( Expression ~ ResponseByLocalization, GE, main=main, sort = F)) # text=label,
+ }
+figure <- ggpubr::ggarrange(plotlist = p, ncol=4, nrow = 5, common.legend = TRUE, legend = "bottom")
+```
+
+```{r, fig.height=12, fig.width=9}
+figure
+```
+
+
+# DREAM
+
+```{r}
+# library(variancePartition)
+library(edgeR)
+library(BiocParallel)
+
+# normalize RNA-seq counts
+#dge = DGEList(counts = countMatrix)
+dge <- DEFormats::as.DGEList(dds)
+dge = calcNormFactors(dge)
+```
+
+
+```{r}
+# Specify parallel processing parameters
+# this is used implicitly by dream() to run in parallel
+param = SnowParam(4, "SOCK", progressbar=TRUE)
+
+# The variable to be tested must be a fixed effect
+form2 <- ~ Response*Localization
+colnames(model.matrix(form2, data=colData(dds)))
+
+# The variable to be tested must be a fixed effect
+form3 <- ~ Response + Localization + Response:Localization
+colnames(model.matrix(form3, data=colData(dds)))
+
+# Combining the variables is more easy to interpret, instead of using an interaction term
+cdata <- colData(dds)
+cdata$combined <- paste(cdata$Response, cdata$Localization, sep = ".")
+  
+form <- ~ 0 + combined
+colnames(model.matrix(form, data=cdata))
+
+
+L = makeContrastsDream( form, data=cdata,
+                        contrasts = c(interaction = "(combinedpCR.stroma-combinednon_pCR.stroma)-(combinedpCR.tumor-combinednon_pCR.tumor)"))
+
+# L = makeContrastsDream( form, data=colData(dds), 
+#   contrasts = c(compare2_1 = "DiseaseSubtype2 - DiseaseSubtype1", 
+#                 compare1_0 = "DiseaseSubtype1 - DiseaseSubtype0"))
+
+# Visualize contrast matrix
+plotContrasts(L) 
+
+# estimate weights using linear mixed model of dream
+vobjDream = voomWithDreamWeights( dge, form, data=cdata, BPPARAM=param )
+
+# Fit the dream model on each gene
+# By default, uses the Satterthwaite approximation for the hypothesis test
+fitmm = dream( vobjDream, form, data=cdata, L)
+```
+
+```{r}
+fitmm = eBayes(fitmm)
+head(fitmm$design)
+head(fitmm$coefficients)
+```
+```{r}
+dge.interaction <- topTable( fitmm, coef="interaction", sort.by = "P", adjust.method = "none", number = 20000) # number = 1000, p.value = 0.01
+dge.interaction
+```
+
+```{r}
+saveRDS(file="/export/scratch/pangelin/HUG/RC_project/data/RCvariancePartition.DREAM.results.rds", dge.interaction)
+save.image("/export/scratch/pangelin/HUG/RC_project/data/RCvariancePartition.WS.rdata.RData")
+```
+
+# Top 20 interaction genes
+
+```{r}
+rownames(quantLog)[top20[1:20]]
+```
+
+```{r}
+intersect(rownames(quantLog)[top20[1:20]], rownames(dge.interaction))
+```
+
+
+
+
+

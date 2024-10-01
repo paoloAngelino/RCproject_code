@@ -11,6 +11,7 @@ Load data
 ```{r}
 library(readr)
 library(tidyverse)
+library(plotROC)
 GEOMXcohort_pseudobulk_nuclei <- read_csv2("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/GEOMXcohort_pseudobulk_nuclei.csv")
 ```
 
@@ -28,8 +29,8 @@ Load model
 #| echo: false
 # models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/randomSampling_modeling_extra_final_de_intersect_plus_bulk_genes_6datasets_scaled.rds")
 # models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/extrasets_modeling_extra_final_6datasets_DEintersect.rds")
-models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/extrasets_modeling_extra_final_6datasets_sig_4_6_0.05.rds")
-# models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/extraset_modeling_extra_final_6datasets_GEOMX_4_6_0.05.Rds")
+ models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/V2.0/extrasets_modeling_extra_final_6datasets_sig_4_6_0.05.rds")
+# models <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/V2.0/extraset_modeling_extra_final_6datasets_GEOMX_4_6_0.05.Rds")
 
 dim(models$gl$trainingData)
 ```
@@ -50,9 +51,9 @@ summary(test_data[,1:10])
 
 ```{r}
 # store intersecting genes
-keep <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds")
-keep$GEOMX_4_6_0.05_ <- intersect(keep$sig_4_6_0.05, GEOMXgenes)
-saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds", keep)
+# keep <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds")
+# keep$GEOMX_4_6_0.05_ <- intersect(keep$sig_4_6_0.05, GEOMXgenes)
+#saveRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds", keep)
 ```
 
 

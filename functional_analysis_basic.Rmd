@@ -21,7 +21,7 @@ params:
 ---
 
 ```{r}
-knitr::opts_chunk$set(cache=TRUE)
+knitr::opts_chunk$set(cache=FALSE)
 ```
 
 
@@ -121,6 +121,8 @@ ggsave(
 mutate(em, qscore = -log(p.adjust, base=10)) %>% 
     barplot(x="qscore", showCategory=20, color = "pvalue") + scale_y_discrete(labels=function(x) str_wrap(x, width=40)) 
 ```
+
+
 ## ORA UP
 
 ```{r}
@@ -147,7 +149,7 @@ mutate(em_up, qscore = -log(p.adjust, base=10)) %>%
 
 ```{r}
 
-em_down <- enricher(DE_UP, minGSSize = 5, maxGSSize = 100, TERM2GENE=t2g, pvalueCutoff = 0.05, qvalueCutoff = 1, pAdjustMethod = "none")
+em_down <- enricher(DE_DOWN, minGSSize = 5, maxGSSize = 100, TERM2GENE=t2g, pvalueCutoff = 0.05, qvalueCutoff = 1, pAdjustMethod = "none")
 ```
 
 ```{r, fig.height=6, fig.width=16}
@@ -166,7 +168,7 @@ mutate(em_down, qscore = -log(p.adjust, base=10)) %>%
 ```
 
 
-## GSEA
+## GSEA Pvalue based
 
 ```{r}
 genelist <- -log10(DE_RES$P.Value_avg)
@@ -181,6 +183,7 @@ em <- GSEA(genelist,
                 pAdjustMethod = "none",
            TERM2GENE=t2g, scoreType = "pos")
 head(em)
+emf <- as_tibble(fortify(em))
 ```
 
 ### Plots
@@ -190,10 +193,10 @@ library(enrichplot)
 em1 <- em
 em1@result$Description <- str_trunc(em1@result$ID, width = 60) 
 
-p <-  dotplot(em1, showCategory=20, color="pvalue")  + scale_y_discrete(labels=function(x) str_wrap(x, width=30)) 
+p <-  dotplot(em1, showCategory=20, color="pvalue")  + scale_y_discrete(labels=function(x) str_wrap(x, width=30))
 p
 ggsave(
-      filename = paste0("GSEADotplot.pdf"), 
+      filename = paste0("GSEADotplot_PVAL.pdf"), 
       plot = p, path =  params$plot.dir
     )
 ```
@@ -210,5 +213,38 @@ ridgeplot(em1, showCategory = 10)
 gseaplot2(em1, geneSetID = 1:3)
 ```
 
+## GSEA logFC based
+
+```{r}
+genelist <- DE_RES$logFC
+names(genelist) <- rownames(DE_RES) 
+genelist <- genelist[order(genelist, decreasing = T)]
+```
+
+
+```{r}
+em <- GSEA(genelist, 
+                pvalueCutoff = 0.05,
+                pAdjustMethod = "none",
+           TERM2GENE=t2g)
+head(em)
+emf <- as_tibble(fortify(em))
+```
+
+### Plots
+
+```{r, fig.height=6, fig.width=16}
+library(enrichplot)
+em1 <- em
+em1@result$Description <- str_trunc(em1@result$ID, width = 60) 
+
+p <-  dotplot(em1, showCategory=20, color="pvalue", split=".sign")  + scale_y_discrete(labels=function(x) str_wrap(x, width=30)) + facet_grid(.~.sign) 
+p
+ggsave(
+      filename = paste0("GSEADotplot_LOGFC.pdf"), 
+      plot = p, path =  params$plot.dir,
+      width = 14, height = 9
+    )
+```
 
 

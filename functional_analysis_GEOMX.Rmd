@@ -1,0 +1,159 @@
+---
+title: "Test functional analysis on GEO dataset collection"
+author:
+  - name: Paolo Angelino
+    affiliation:
+      - TDS Facility, SIB Swiss Institute of Bioinformatics, Lausanne, Switzerland
+    email: paolo.angelino@sib.swiss
+date: "`r format(Sys.time(), '%d %b %Y')`"
+output:
+  prettydoc::html_pretty:
+    theme: hpstr
+    toc: yes
+    toc_depth: 2
+    number_sections: yes
+    fig_caption: yes
+    df_print: paged
+params:
+  gene.list: /data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds # gene symbol character vector
+  plot.dir: /data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/GSEA_plots
+  selected.list: "sig_4_6_0.05"
+---
+
+```{r}
+knitr::opts_chunk$set(cache=FALSE)
+```
+
+
+```{r}
+library(ReactomePA)
+library(clusterProfiler)
+require(dplyr)
+library(ggplot2)
+library(stringr)
+```
+
+```{r}
+
+DE_RES <- readRDS('/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/bothCohorts_response_genes.rds')
+DE_RES$P.Value_avg <- DE_RES %>% dplyr::select(adj.P.Val_1, adj.P.Val_2, adj.P.Val_3, adj.P.Val_4, adj.P.Val_5) %>% as.matrix %>% rowMeans
+DE_RES$logFC <- DE_RES %>% dplyr::select(logFC_1, logFC_2, logFC_3, logFC_4, logFC_5) %>% as.matrix %>% rowMeans
+```
+
+
+## Load Gene sets
+
+We load the gene sets using the `msigdb` package, and extact only the gene sets we described above. This might take a few minutes to run.
+
+```{r}
+# 
+# library(msigdb)
+# library(GSEABase)
+# 
+# msigdb_hs <- getMsigdb(version = '7.2')
+# msigdb_hs <- appendKEGG(msigdb_hs)
+# 
+# sc <- listSubCollections(msigdb_hs)
+# collections <- listCollections(msigdb_hs)
+# 
+# #gsc <- c(subsetCollection(msigdb_hs, c('h')),
+# #  subsetCollection(msigdb_hs, 'c2', sc[grepl("^CP:",sc)]),
+# #  subsetCollection(msigdb_hs, 'c5', sc[grepl("^GO:",sc)])) %>%
+# #  GeneSetCollection()
+# 
+# gsc <- c(subsetCollection(msigdb_hs, c('h')),
+#   subsetCollection(msigdb_hs, subcollection = 'CP:REACTOME'),
+#   subsetCollection(msigdb_hs, subcollection = 'CP:KEGG')) %>%
+#   GeneSetCollection()
+# 
+# t2g_list <- geneIds(gsc)
+# t2g <- data.frame(term=character(0),gene=character(0)) 
+# for (n in names(t2g_list)) {
+#   t2g <- rbind(t2g, data.frame(term=n, gene=t2g_list[[n]]))
+# }
+# saveRDS(t2g, "/data/pangelin/HUG/Thibaud/RC_GEOMX/annotations/geneset_2023_10_23.Rds")
+
+t2g <- readRDS("/data/pangelin/HUG/Thibaud/RC_GEOMX/annotations/geneset_2023_10_23.Rds")
+```
+
+## GSEA
+
+```{r}
+genelist <- -log10(DE_RES$P.Value_avg)
+names(genelist) <- rownames(DE_RES) 
+genelist <- genelist[order(genelist, decreasing = T)]
+```
+
+
+```{r}
+em <- GSEA(genelist, 
+                pvalueCutoff = 0.05,
+                pAdjustMethod = "none",
+           TERM2GENE=t2g, scoreType = "pos")
+head(em)
+```
+
+### Plots
+
+```{r, fig.height=6, fig.width=16}
+library(enrichplot)
+em1 <- em
+em1@result$Description <- str_trunc(em1@result$ID, width = 60) 
+
+p <-  dotplot(em1, showCategory=20, color="pvalue")  + scale_y_discrete(labels=function(x) str_wrap(x, width=30)) 
+p
+ggsave(
+      filename = paste0("GEOMX_interaction_GSEADotplot.pdf"), 
+      plot = p, path =  params$plot.dir
+    )
+```
+
+```{r, fig.width=12}
+upsetplot(em1)
+```
+
+```{r, fig.width=8, fig.height=7}
+ridgeplot(em1, showCategory = 10)
+```
+
+```{r}
+gseaplot2(em1, geneSetID = 1:3)
+```
+
+
+## GSEA logFC based
+
+```{r}
+genelist <- DE_RES$logFC
+names(genelist) <- rownames(DE_RES) 
+genelist <- genelist[order(genelist, decreasing = T)]
+```
+
+
+```{r}
+em <- GSEA(genelist, 
+                pvalueCutoff = 0.05,
+                pAdjustMethod = "none",
+           TERM2GENE=t2g)
+head(em)
+emf <- as_tibble(fortify(em))
+```
+
+### Plots
+
+```{r, fig.height=6, fig.width=16}
+library(enrichplot)
+em1 <- em
+em1@result$Description <- str_trunc(em1@result$ID, width = 60) 
+
+p <-  dotplot(em1, showCategory=20, color="pvalue", split=".sign")  + scale_y_discrete(labels=function(x) str_wrap(x, width=30)) + facet_grid(.~.sign) 
+p
+ggsave(
+      filename = paste0("GEOMXX_interaction_GSEADotplot_LOGFC.pdf"), 
+      plot = p, path =  params$plot.dir,
+      width = 14, height = 9
+    )
+```
+
+
+

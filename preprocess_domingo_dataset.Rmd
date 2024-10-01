@@ -15,6 +15,7 @@ params:
 library(readr)
 library(dplyr)
 library(textshape)
+library(plotROC)
 Metadata_Training <- read_csv("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/eBioMed_data/Metadata_Training.csv")
 
 Domingo_ebiomedicine_probes <- read_csv("/data/pangelin/HUG/Thibaud/RC_GEOMX/data/eBioMed_data/Domingo_ebiomedicine_probes.csv")
@@ -118,11 +119,12 @@ probes <- character(length(unique(model_probes$`Gene Symbol`)))
 names(probes) <- unique(model_probes$`Gene Symbol`)
 for(n in unique(model_probes$`Gene Symbol`) ){
   cors_tmp <- cors[model_probes %>% filter(`Gene Symbol` == n) %>% pull(var="Probe Set ID")]
-  if(logFCs[n,"logFC"] >0 ) {
-    probes[n] <- names(cors_tmp)[which(cors_tmp == max(cors_tmp) )]
-  } else {
-    probes[n] <- names(cors_tmp)[which(cors_tmp == min(cors_tmp) )]
-  }
+  probes[n] <- names(cors_tmp)[which(abs(cors_tmp) == max(abs(cors_tmp)) )]
+  # if(logFCs[n,"logFC"] >0 ) {
+  #   probes[n] <- names(cors_tmp)[which(cors_tmp == max(cors_tmp) )]
+  # } else {
+  #   probes[n] <- names(cors_tmp)[which(cors_tmp == min(cors_tmp) )]
+  # }
 }
 ```
 
@@ -152,5 +154,19 @@ autoplot(pca_res, data = Metadata_Training[rownames(X),], colour = "response")
   test_res <- predict(models$rf, newdata =X, type="prob")
   colnames(test_res) = c("nonresponder", "responder")
   print(pROC::plot.roc(Metadata_Training[rownames(X),]  %>% pull(var="response"), test_res$responder, print.auc=TRUE))
+
+  
+    
+  test_res$obs <- Metadata_Training[rownames(X),]  %>% pull(var="response")
+  g <- ggplot(test_res, aes(m=nonresponder, d=obs)) + #factor(obs, levels = c("no", "yes"))
+    geom_roc(n.cuts=0) + 
+    coord_equal() +
+    style_roc()
+  auc_for_plot <- paste("AUC =", format(round((calc_auc(g))$AUC, 2), nsmall=2))
+  g = g + annotate("text", x=0.75, y=0.25, label=auc_for_plot) + ggtitle("Random Forest ROC")
+  print(g)
+  pdf("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/Domingo_sig_4_6_0.05_RF_ROC.pdf")
+  print(g)
+  dev.off()
 
 ```
