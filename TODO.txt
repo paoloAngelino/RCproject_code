@@ -1,0 +1,17 @@
+
+Review sample annotation
+
+Add datasets? (from Domingo et all)
+
+Outliers detection
+
+Class balancing?
+
+Batch correction?
+
+Include MLflow
+
+Feature selection: Boruta?, Forward/Backward selection?
+
+Add models: GBM, XGBoost, others?
+
