@@ -9,6 +9,8 @@ Class balancing?
 
 Batch correction?
 
+Quantile normalization?
+
 Include MLflow
 
 Feature selection: Boruta?, Forward/Backward selection?
