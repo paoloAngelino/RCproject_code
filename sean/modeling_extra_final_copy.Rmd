@@ -1,27 +1,27 @@
 ---
-  title: "`r paste0('glmnet and randomForest in R (caret), ', params$title)`"
+title: "`r paste0('glmnet and randomForest in R (caret), ', params$title)`"
 author: "Paolo Angelino"
 output:
   html_document:
-  depth: 2
-highlight: tango
-number_sections: yes
-toc: yes
+    depth: 2
+    highlight: tango
+    number_sections: yes
+    toc: yes
 params:
-  usescaled: TRUE
-trainds: !r c("GSE150082", "GSE94104", "GSE133057")
-testds: !r c("GSE93375", "GSE145037", "GSE209746") # "GSE45404_GPL1", "GSE45404_GPL2", "GSE190826"
-allds: TRUE # datasets for training
-seed: 26326
-save.model: '/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/cv3_modeling_extra_fix_6datasets_sig_4_6_0.05.Rds'
-gene.list.file: "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds" # "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/public.signature.list.Rds"
-gene.list: "sig_4_6_0.05" # "DE4" "DEall" "meta_intersect_unionDE"  "5k" "meta"  "de_intersect_plus_bulk_genes"
-title: "sig_4_6_0.05 signature model, 3 fold CV, 6 datasets"
-cv: 3
+  assay: 'quantile'
+  trainds: !r c("GSE150082", "GSE94104", "GSE133057")
+  testds: !r c("GSE93375", "GSE145037", "GSE209746")
+  allds: TRUE # datasets for training
+  seed: 26326
+  save.model: '/export/big/sean/models/cv3_modeling_extra_fix_6datasets_sig_4_6_0.05.Rds'
+  gene.list.file: "/export/big/sean/RCproject/gene_lists.rds"
+  gene.list: "sig_4_6_0.05" # "DE4" "DEall" "meta_intersect_unionDE"  "5k" "meta"  "de_intersect_plus_bulk_genes"
+  title: "sig_4_6_0.05 signature model, 3 fold CV, 6 datasets"
+  cv: 3
 ---
   
   ```
-lapply(c("Ago_2016", "g1", "Ghad_2005", "Gim_2016", "Kim_2007", "Park_2020", "RSS", "Wat_2006", "sig_4_6_0.05"), function(x) { rmarkdown::render("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/scripts/modeling_extra_final.Rmd", output_file=paste0("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/scripts/CV3.modeling_extra_final.",x,".report.html"), params = list(gene.list = x, title = paste0("public signature model CV, gene list ", x))) })
+lapply(c("Ago_2016", "g1", "Ghad_2005", "Gim_2016", "Kim_2007", "Park_2020", "RSS", "Wat_2006", "sig_4_6_0.05"), function(x) { rmarkdown::render("/export/big/sean/RCproject_code/sean/modeling_extra_final_copy.Rmd", output_file=paste0("/export/big/sean/reports/CV3.modeling_extra_final.",x,".report.html"), params = list(gene.list = x, title = paste0("public signature model CV, gene list ", x))) })
 ```
 
 ```{r setup, include=FALSE}
@@ -46,7 +46,7 @@ library(SingleCellExperiment)
 ```
 
 Parameters:
-  ```{r}
+```{r}
 print(params)
 ```
 
@@ -56,7 +56,7 @@ print(params)
 ## Load data, remove redundat variables
 ```{r, message=FALSE, warning=FALSE}
 # load data
-spe <- readRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/data/GEO_singlecellexperiment.rds")
+spe <- readRDS(file = "/export/big/sean/RCproject/GEO_singlecellexperiment.rds")
 ```
 
 ## Summary of data
@@ -69,15 +69,35 @@ prop.table(table(colData(spe)$Response))
 # are there any missing values?
 any(is.na(colData(spe)$Response))
 ```
+## Adding quantile normalization assay and comparing count distributionst between assays
 
 ```{r}
-if (params$usescaled) {
+
+source('/export/big/sean/RCproject_code/sean/quantile_normalization.r')
+spe <- quantile_normalization(spe)
+
+if (params$assay == 'scale') {
   assay_to_use <- 3
   assayname_to_use <- "scalelogcounts"
-} else {
+} else if (params$assay == 'quantile') {  
+  assay_to_use <- 4
+  assayname_to_use <- "quantile_norm"
+} else if (params$assay == 'logcounts') {
   assay_to_use <- 2
   assayname_to_use <- "logcounts"
 }
+
+##comparing assays
+librarr('standR')
+print('original counts')
+plotRLExpr(spe, ordannots = "batch", assay = 1, color = batch)
+print('log counts')
+plotRLExpr(spe, ordannots = "batch", assay = 2, color = batch)
+print('scaled counts')
+plotRLExpr(spe, ordannots = "batch", assay = 3, color = batch)
+print('quantile normalized counts')
+plotRLExpr(spe, ordannots = "batch", assay = 4, color = batch)
+
 ```
 
 ## filter samples
