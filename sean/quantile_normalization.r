@@ -1,19 +1,37 @@
 quantile_normalization <- function(sce){
-    counts = counts(sce)
-    #determine the ranks of the counts
-    counts_rank <- apply(counts,2,rank,ties.method="min")
-    #sort the original from lowest to highest
-    counts_sorted <- data.frame(apply(counts, 2, sort))
-    # calculate the means
-    counts_mean <- apply(counts_sorted, 1, mean)
-    # set up a function for applying means to rank
-    index_to_mean <- function(my_index, my_mean){
-      return(my_mean[my_index])
-    }
-    #create the quantile counts
-    counts_quantile_final <- apply(counts_rank, 2, index_to_mean, my_mean=counts_mean)
-    rownames(counts_quantile_final) <- rownames(counts)
-    #assigning the assay to the original object
-    assay(sce, 4) <- counts_quantile_final
-    return(sce)
+  
+  ordered_results <- apply(counts, 2, function(x) {
+    # Get the order of the indices from highest to lowest
+    ordered_indices <- order(x, decreasing = TRUE)
+    # Return a list of ordered values and the original indices
+    list(ordered_values = x[ordered_indices], original_indices = ordered_indices)
+  })
+  
+  ordered_matrix <- matrix(
+    unlist(lapply(ordered_results, function(x) x$ordered_values)),
+    nrow = nrow(counts),
+    byrow = FALSE
+  )
+  
+  # Compute the average for each row
+  row_averages <- rowMeans(ordered_matrix)
+  
+  # Replace each row's values with the row's average
+  average_matrix <- matrix(rep(row_averages, ncol(ordered_matrix)),
+                           nrow = nrow(ordered_matrix), byrow = FALSE)
+  
+  # Reconstruct original matrix based on saved indices
+  reconstructed_matrix <- matrix(NA, nrow = nrow(counts), ncol = ncol(counts))
+  
+  for (i in 1:ncol(counts)) {
+    original_indices <- ordered_results[[i]]$original_indices
+    reconstructed_matrix[original_indices, i] <- average_matrix[, i]
+  }
+  
+  colnames(reconstructed_matrix) <- colnames(counts)
+  rownames(reconstructed_matrix) <- rownames(counts)
+  
+  assay(sce, 'quantile_norm') <- reconstructed_matrix             
+  
+  return(sce)
 }
