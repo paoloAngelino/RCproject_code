@@ -1,0 +1,412 @@
+---
+  title: "`r paste0('glmnet and randomForest in R (caret), ', params$title)`"
+author: "Paolo Angelino"
+output:
+  html_document:
+  depth: 2
+highlight: tango
+number_sections: yes
+toc: yes
+params:
+  usescaled: TRUE
+trainds: !r c("GSE150082", "GSE94104", "GSE133057")
+testds: !r c("GSE93375", "GSE145037", "GSE209746") # "GSE45404_GPL1", "GSE45404_GPL2", "GSE190826"
+allds: TRUE # datasets for training
+seed: 26326
+save.model: '/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/cv3_modeling_extra_fix_6datasets_sig_4_6_0.05.Rds'
+gene.list.file: "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/results/gene_lists.rds" # "/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/var/public.signature.list.Rds"
+gene.list: "sig_4_6_0.05" # "DE4" "DEall" "meta_intersect_unionDE"  "5k" "meta"  "de_intersect_plus_bulk_genes"
+title: "sig_4_6_0.05 signature model, 3 fold CV, 6 datasets"
+cv: 3
+---
+  
+  ```
+lapply(c("Ago_2016", "g1", "Ghad_2005", "Gim_2016", "Kim_2007", "Park_2020", "RSS", "Wat_2006", "sig_4_6_0.05"), function(x) { rmarkdown::render("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/scripts/modeling_extra_final.Rmd", output_file=paste0("/data/pangelin/HUG/Thibaud/RC_GEOMX/analysis/scripts/CV3.modeling_extra_final.",x,".report.html"), params = list(gene.list = x, title = paste0("public signature model CV, gene list ", x))) })
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+if (!require("tidyverse", quietly = TRUE))
+  install.packages("tidyverse")
+
+if (!require("caret", quietly = TRUE))
+  BiocManager::install("caret")
+
+if (!require("caTools", quietly = TRUE))
+  BiocManager::install("caTools")
+
+# load libraries
+library(tidyverse)
+library(caret)
+library(caTools)
+library(SingleCellExperiment)
+```
+
+Parameters:
+  ```{r}
+print(params)
+```
+
+
+# Data wrangling
+
+## Load data, remove redundat variables
+```{r, message=FALSE, warning=FALSE}
+# load data
+spe <- readRDS(file = "/data/pangelin/HUG/Thibaud/RC_GEOMX/data/GEO_singlecellexperiment.rds")
+```
+
+## Summary of data
+
+```{r}
+# propotion in response
+table(colData(spe)$Response)
+prop.table(table(colData(spe)$Response))
+
+# are there any missing values?
+any(is.na(colData(spe)$Response))
+```
+
+```{r}
+if (params$usescaled) {
+  assay_to_use <- 3
+  assayname_to_use <- "scalelogcounts"
+} else {
+  assay_to_use <- 2
+  assayname_to_use <- "logcounts"
+}
+```
+
+## filter samples
+
+```{r}
+table(spe$batch)
+```
+
+```{r}
+#spe <- spe[, !(spe$batch %in% c("GSE190826", "GSE209746","GSE45404_GPL2"))]
+spe <- spe[, spe$Response %in% c("yes","no")]
+dim(spe)
+```
+
+## filter features
+
+```{r}
+keep <- readRDS(params$gene.list.file)
+sig.genes <- intersect(keep[[params$gene.list]], rownames(spe))
+spe <- spe[sig.genes,]
+dim(spe)
+```
+
+
+# Models
+
+
+```{r}
+get_model <- function(spe, folds = 5, assay_to_use=3, seed=1111){
+  
+  # subset predictors variables
+  df_x <- t(assay(spe,assay_to_use))
+  
+  # subset response variable
+  df_y <- spe$Response
+  
+  # convert diagnosis as factor
+  df_y <- as.factor(df_y)
+  
+  print(table(df_y))
+  
+  if(folds == 1){
+    set.seed(seed)
+    my_trainControl <- trainControl(
+      summaryFunction = twoClassSummary,
+      classProbs = TRUE,
+      verboseIter = FALSE,
+      savePredictions = TRUE)
+  } else {
+    # create indices for each fold
+    set.seed(seed)
+    my_folds <- createFolds(df_y, k = folds)
+    
+    # structure of "my_fold"
+    my_folds %>% glimpse
+    # distribution of class is preserved in each fold
+    my_folds %>% 
+      map_df(~prop.table(table(df_y[.])))
+    
+    # create trainControl object
+    my_trainControl <- trainControl(
+      summaryFunction = twoClassSummary,
+      classProbs = TRUE,
+      verboseIter = FALSE,
+      savePredictions = TRUE,
+      index = my_folds)
+  }
+  
+  # train glmnet model
+  set.seed(seed+2364)
+  model_glmnet <- train(x = df_x, y = df_y, 
+                        method = "glmnet",
+                        metric = "ROC",
+                        tuneLength = 20,
+                        trControl = my_trainControl, 
+                        family = "binomial"
+  )
+  
+  # print model
+  model_glmnet
+  
+  model_glmnet$results %>% 
+    as_tibble %>%  
+    arrange(desc(ROC))
+  
+  # plot ROCs
+  plot(model_glmnet)
+  
+  # train randomForest model
+  set.seed(seed+7474)
+  model_randomForest <- train(x = df_x, y = df_y, 
+                              method = "ranger",
+                              metric = "ROC",
+                              importance = "permutation",
+                              tuneLength = 20,
+                              trControl = my_trainControl)
+  
+  # print model
+  model_randomForest
+  
+  # plot model
+  plot(model_randomForest)
+  
+  model_randomForest$results %>% 
+    as_tibble %>%  
+    arrange(desc(ROC))
+  
+  return(list(gl = model_glmnet, rf = model_randomForest))
+}
+```
+
+
+```{r}
+model_plots <- function(mymodel){
+  library(plotROC)
+  # Select a parameter setting
+  
+  selectedIndices <- !logical(length = nrow(mymodel$pred))
+  for (n in names(mymodel$bestTune)) {
+    print(mymodel$bestTune[[n]])
+    if(is.factor(mymodel$bestTune[[n]])) mymodel$bestTune[[n]] <- as.character(mymodel$bestTune[[n]])
+    selectedIndices <- selectedIndices & mymodel$pred[n] == mymodel$bestTune[[n]]
+  }
+  
+  g <- ggplot(mymodel$pred[selectedIndices, ], aes(m=yes, d=factor(obs, levels = c("no", "yes")))) + 
+    geom_roc(n.cuts=0) + 
+    coord_equal() +
+    style_roc()
+  
+  print(g + annotate("text", x=0.75, y=0.25, label=paste("AUC =", round((calc_auc(g))$AUC, 4))))
+  
+  print(plot(varImp(mymodel, scale = FALSE), top = 10, main = mymodel$modelInfo$label))
+}
+```
+
+
+```{r}
+predict.one <- function(mymodel, spe, assay_to_use = 3, reflevel = "yes"){
+  test_res <- predict(mymodel, newdata =  t(assay(spe, assay_to_use)), type="prob")
+  rownames(test_res) <- colnames(spe)
+  print(pROC::plot.roc(spe$Response, test_res$yes, print.auc=TRUE))
+  
+  test_res$obs <- ifelse(spe$Response==reflevel, 1, 0)
+  
+  g <- ggplot(test_res, aes(m=yes, d=obs)) + #factor(obs, levels = c("no", "yes"))
+    geom_roc(n.cuts=0) + 
+    coord_equal() +
+    style_roc()
+  
+  
+  print(g + annotate("text", x=0.75, y=0.25, label=paste("AUC =", round((calc_auc(g))$AUC, 4))))
+  
+  return(list(res=test_res,auc=round((calc_auc(g))$AUC, 4)))
+}
+```
+
+
+# Loop over folds
+
+
+```{r}
+if(params$allds == TRUE){
+  spe <- spe[, spe$batch %in% c(params$trainds,params$testds)]
+  print(spe)
+  observations <- as.factor(spe$Response)
+  set.seed(params$seed)
+  my_folds <- caret::createFolds(observations, k = params$cv)
+  
+} else {
+  
+  spe.train <- spe[, spe$batch %in% params$trainds]
+  cat("Train set dim:", dim(spe.train),"\n")
+  
+  spe.test <- spe[, spe$batch %in% params$testds]
+  cat("Test set dim:", dim(spe.test),"\n")
+}
+```
+
+
+```{r}
+if(params$allds == TRUE){
+  res_list <- list()
+  for(i in 1:params$cv){
+    train_ids <- unlist(my_folds[setdiff(1:5, i)])
+    test_ids <- unlist(my_folds[i])
+    spe.train <- spe[, train_ids]
+    cat("Train set dim:", dim(spe.train),"\n")
+    
+    spe.test <- spe[, test_ids]
+    cat("Test set dim:", dim(spe.test),"\n")
+    res <- get_model(spe.train, folds = 1, assay_to_use = assay_to_use, seed = params$seed)
+    model_plots(res$gl)
+    model_plots(res$rf)
+    resamples <- resamples(res)
+    # plot the comparison
+    bwplot(resamples, metric = "ROC")
+    # plot the comparison per each fold
+    xyplot(resamples, metric = "ROC")
+    res_list[[i]] <- res
+  }
+} else {
+  res <- get_model(spe.train, folds = 1, assay_to_use = assay_to_use, seed = params$seed)
+  model_plots(res$gl)
+  model_plots(res$rf)
+  resamples <- resamples(res)
+  # plot the comparison
+  bwplot(resamples, metric = "ROC")
+  # plot the comparison per each fold
+  xyplot(resamples, metric = "ROC")
+}
+
+```
+
+# AUC Random Forrest
+
+```{r}
+if(params$allds == TRUE){
+  RF_AUC_list <- list()
+  AUCs <- numeric(params$cv)
+  for (i in 1:params$cv) {
+    train_ids <- unlist(my_folds[setdiff(1:5, i)])
+    spe.train <- spe[, train_ids]
+    res_tmp <- predict.one(res_list[[i]]$rf, spe.train, assay_to_use = assay_to_use)
+    RF_AUC_list[[i]] <- res_tmp$res
+    AUCs[[i]] <- res_tmp$auc
+  }
+  RF_AUC <- do.call(rbind,RF_AUC_list)
+  g <- ggplot(RF_AUC, aes(m=yes, d=obs)) + #factor(obs, levels = c("no", "yes"))
+    geom_roc(n.cuts=0) + 
+    coord_equal() +
+    style_roc()
+  print(g + annotate("text", x=0.75, y=0.25, label=paste("AUC =", round((calc_auc(g))$AUC, 4))))
+  print(summary(AUCs))
+  print(sd(AUCs))
+} else {
+  predict.one(res$rf, spe.train, assay_to_use = assay_to_use)
+}
+```
+
+```{r}
+if(params$allds == TRUE){
+  RF_AUC_list <- list()
+  AUCs <- numeric(params$cv)
+  for (i in 1:params$cv) {
+    test_ids <- unlist(my_folds[i])
+    spe.test <- spe[, test_ids]
+    res_tmp <- predict.one(res_list[[i]]$rf, spe.test, assay_to_use = assay_to_use)
+    RF_AUC_list[[i]] <- res_tmp$res
+    AUCs[[i]] <- res_tmp$auc
+  }
+  RF_AUC <- do.call(rbind,RF_AUC_list)
+  g <- ggplot(RF_AUC, aes(m=yes, d=obs)) + #factor(obs, levels = c("no", "yes"))
+    geom_roc(n.cuts=0) + 
+    coord_equal() +
+    style_roc()
+  auc_for_plot <- paste("AUC =", format(round(mean(AUCs), 2), nsmall=2), "±", round(sd(AUCs), 2))
+  g = g + annotate("text", x=0.75, y=0.25, label=auc_for_plot) + ggtitle("Random Forest ROC")
+  print(g)
+  pdf(sub(".Rds", paste0("_RF_ROC.pdf") , params$save.model))
+  print(g)
+  dev.off()
+  print(summary(AUCs))
+  print(sd(AUCs))
+} else {
+  predict.one(res$rf, spe.test, assay_to_use = assay_to_use)
+}
+```
+
+
+# AUC GLMnet
+
+```{r}
+if(params$allds == TRUE){
+  RF_AUC_list <- list()
+  AUCs <- numeric(params$cv)
+  for (i in 1:params$cv) {
+    train_ids <- unlist(my_folds[setdiff(1:5, i)])
+    spe.train <- spe[, train_ids]
+    res_tmp <- predict.one(res_list[[i]]$gl, spe.train, assay_to_use = assay_to_use)
+    RF_AUC_list[[i]] <- res_tmp$res
+    AUCs[[i]] <- res_tmp$auc
+  }
+  RF_AUC <- do.call(rbind,RF_AUC_list)
+  g <- ggplot(RF_AUC, aes(m=yes, d=obs)) + #factor(obs, levels = c("no", "yes"))
+    geom_roc(n.cuts=0) + 
+    coord_equal() +
+    style_roc()
+  print(g + annotate("text", x=0.75, y=0.25, label=paste("AUC =", round((calc_auc(g))$AUC, 4))))
+  print(summary(AUCs))
+  print(sd(AUCs))
+} else {
+  predict.one(res$gl, spe.train, assay_to_use = assay_to_use)
+}
+```
+
+```{r}
+if(params$allds == TRUE){
+  RF_AUC_list <- list()
+  AUCs <- numeric(params$cv)
+  for (i in 1:params$cv) {
+    test_ids <- unlist(my_folds[i])
+    spe.test <- spe[, test_ids]
+    res_tmp <- predict.one(res_list[[i]]$gl, spe.test, assay_to_use = assay_to_use)
+    RF_AUC_list[[i]] <- res_tmp$res
+    AUCs[[i]] <- res_tmp$auc
+  }
+  RF_AUC <- do.call(rbind,RF_AUC_list)
+  g <- ggplot(RF_AUC, aes(m=yes, d=obs)) + #factor(obs, levels = c("no", "yes"))
+    geom_roc(n.cuts=0) + 
+    coord_equal() +
+    style_roc()
+  auc_for_plot <- paste("AUC =", format(round(mean(AUCs), 2), nsmall=2), "±", round(sd(AUCs), 2))
+  g = g + annotate("text", x=0.75, y=0.25, label=auc_for_plot) + ggtitle("glmnet ROC")
+  print(g)
+  pdf(sub(".Rds", paste0("_GL_ROC.pdf") , params$save.model))
+  print(g)
+  dev.off()
+  print(summary(AUCs))
+  print(sd(AUCs))
+  pred.output <- cbind(colData(spe[,unlist(my_folds)]), RF_AUC, by=0)
+  print(pred.output)
+  saveRDS(file=sub(".Rds", paste0("_GL_predictions.Rds"), params$save.model), pred.output)
+} else {
+  predict.one(res$gl, spe.test, assay_to_use = assay_to_use)
+}
+```
+
+```{r}
+if(!is.null(params$save.model)){
+  saveRDS(file=params$save.model, res) 
+}
+```
