@@ -1,5 +1,7 @@
 quantile_normalization <- function(sce){
   
+  counts <- counts(sce)
+  
   ordered_results <- apply(counts, 2, function(x) {
     # Get the order of the indices from highest to lowest
     ordered_indices <- order(x, decreasing = TRUE)
@@ -31,7 +33,7 @@ quantile_normalization <- function(sce){
   colnames(reconstructed_matrix) <- colnames(counts)
   rownames(reconstructed_matrix) <- rownames(counts)
   
-  assay(sce, 'quantile_norm') <- reconstructed_matrix             
+  assay(sce, 'quantile_norm') <- log(as.matrix(reconstructed_matrix))             
   
   return(sce)
 }

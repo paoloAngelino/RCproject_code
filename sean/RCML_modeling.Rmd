@@ -8,21 +8,17 @@ output:
     number_sections: yes
     toc: yes
 params:
-  assay: 'quantile'
+  assay: 'npn'   #options are: counts, logcounts, scalelogcounts, quantile_norm, and npn
   trainds: !r c("GSE150082", "GSE94104", "GSE133057")
   testds: !r c("GSE93375", "GSE145037", "GSE209746")
   allds: TRUE # datasets for training
   seed: 26326
-  save.model: '/export/big/sean/models/cv3_modeling_extra_fix_6datasets_sig_4_6_0.05.Rds'
-  gene.list.file: "/export/big/sean/RCproject/gene_lists.rds"
+  save.model: '~/models/cv3_modeling_extra_fix_6datasets_sig_4_6_0.05.Rds'
+  gene.list.file: "~/RCproject/gene_lists.rds"
   gene.list: "sig_4_6_0.05" # "DE4" "DEall" "meta_intersect_unionDE"  "5k" "meta"  "de_intersect_plus_bulk_genes"
-  title: "sig_4_6_0.05 signature model, 3 fold CV, 6 datasets"
+  title: "sig_4_6_0.1 signature model, 3 fold CV, 6 datasets, quantile_norm"
   cv: 3
 ---
-  
-  ```
-lapply(c("Ago_2016", "g1", "Ghad_2005", "Gim_2016", "Kim_2007", "Park_2020", "RSS", "Wat_2006", "sig_4_6_0.05"), function(x) { rmarkdown::render("/export/big/sean/RCproject_code/sean/modeling_extra_final_copy.Rmd", output_file=paste0("/export/big/sean/reports/CV3.modeling_extra_final.",x,".report.html"), params = list(gene.list = x, title = paste0("public signature model CV, gene list ", x))) })
-```
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -62,42 +58,60 @@ spe <- readRDS(file = "/export/big/sean/RCproject/GEO_singlecellexperiment.rds")
 ## Summary of data
 
 ```{r}
-# propotion in response
+# proportion in response
 table(colData(spe)$Response)
 prop.table(table(colData(spe)$Response))
 
 # are there any missing values?
 any(is.na(colData(spe)$Response))
 ```
-## Adding quantile normalization assay and comparing count distributionst between assays
+## Adding quantile normalization assay and comparing count distributions between assays
 
 ```{r}
 
+## adding the quantile normalizaiton assay
 source('/export/big/sean/RCproject_code/sean/quantile_normalization.r')
 spe <- quantile_normalization(spe)
 
-if (params$assay == 'scale') {
-  assay_to_use <- 3
-  assayname_to_use <- "scalelogcounts"
-} else if (params$assay == 'quantile') {  
-  assay_to_use <- 4
-  assayname_to_use <- "quantile_norm"
-} else if (params$assay == 'logcounts') {
+## adding the nonparametric normalizaiton assay
+source('/export/big/sean/RCproject_code/sean/npn_normalization.r')
+source('/export/big/sean/RCproject_code/sean/prep_for_npn.r')
+counts <- counts(spe)
+count_dt <- normalize_counts_to_dt(counts)
+npn_counts <- NPNSingleDT(count_dt)
+
+#npn count addition clean up
+npn_counts <- npn_counts[, -1]
+#ensure objects are similar before transferring rownames
+counts <- as.matrix(counts)
+npn_counts <- as.matrix(npn_counts)
+rownames(npn_counts) <- rownames(counts)
+assay(spe, 'npn', withDimnames=FALSE) <- npn_counts
+
+if (params$assay == 'counts') {
+  assay_to_use <- 1
+  assayname_to_use <- "counts"
+} else if (params$assay == 'logcounts') {  
   assay_to_use <- 2
   assayname_to_use <- "logcounts"
+} else if (params$assay == 'scalelogcounts') {
+  assay_to_use <- 3
+  assayname_to_use <- "scalelogcounts"
+} else if (params$assay == 'quantile_norm') {
+  assay_to_use <- 4
+  assayname_to_use <- "quantile_norm"
+} else if (params$assay == 'npn') {
+  assay_to_use <- 5
+  assayname_to_use <- "npn"
 }
 
 ##comparing assays
-librarr('standR')
-print('original counts')
-plotRLExpr(spe, ordannots = "batch", assay = 1, color = batch)
-print('log counts')
-plotRLExpr(spe, ordannots = "batch", assay = 2, color = batch)
-print('scaled counts')
-plotRLExpr(spe, ordannots = "batch", assay = 3, color = batch)
-print('quantile normalized counts')
-plotRLExpr(spe, ordannots = "batch", assay = 4, color = batch)
-
+library('standR')
+plotRLExpr(spe, ordannots = "batch", assay = 'counts', color = batch) + ggtitle("Counts")
+plotRLExpr(spe, ordannots = "batch", assay = 'logcounts', color = batch) + ggtitle("logcounts")
+plotRLExpr(spe, ordannots = "batch", assay = 'scalelogcounts', color = batch) + ggtitle("scalelogcounts")
+plotRLExpr(spe, ordannots = "batch", assay = 'quantile_norm', color = batch) + ggtitle("quantile_norm")
+plotRLExpr(spe, ordannots = "batch", assay = 'npn', color = batch) + ggtitle("npn")
 ```
 
 ## filter samples
@@ -126,7 +140,8 @@ dim(spe)
 
 
 ```{r}
-get_model <- function(spe, folds = 5, assay_to_use=3, seed=1111){
+
+get_model <- function(spe, folds = 5, assay_to_use=assay_to_use, seed=1111){
   
   # subset predictors variables
   df_x <- t(assay(spe,assay_to_use))
@@ -235,7 +250,7 @@ model_plots <- function(mymodel){
 
 
 ```{r}
-predict.one <- function(mymodel, spe, assay_to_use = 3, reflevel = "yes"){
+predict.one <- function(mymodel, spe, assay_to_use = assay_to_use, reflevel = "yes"){
   test_res <- predict(mymodel, newdata =  t(assay(spe, assay_to_use)), type="prob")
   rownames(test_res) <- colnames(spe)
   print(pROC::plot.roc(spe$Response, test_res$yes, print.auc=TRUE))
