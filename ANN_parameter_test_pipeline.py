@@ -52,26 +52,28 @@ gene_list_names = gene_lists.keys()
 
 print('test')
 
-def test_params(current_gene_list):
+dropout_rates = [0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5]
+
+def test_params(current_value):
 
     print('lets go')
     
     epoch_count = 0
     pandas2ri.activate()
     test_set_size = 0.1
-    dropout_rate = 0.3 #0.1
+    dropout_rate = current_value #0.1
     balance = True
     l2_reg = 0.1
     batch_size = 16  #determines how many samples are processed per batch, each epoch will process multiple batches
     learning_rate = 0.00001
-    num_epochs = 1500
+    num_epochs = 3000
     report_frequency = 5
     accuracy_threshold = 0.95
     clipnorm = 2.0
     simplifly_categories = True
     holdout_size = 0.5
     use_gene_list = True
-    current_gene_list = current_gene_list
+    current_gene_list = 'de_intersect_plus_bulk_genes'
     PCA_reduce = False
     n_comp_PCA = 16
 
@@ -333,10 +335,12 @@ def test_params(current_gene_list):
                 print('Early stopping: test set performance high enough')
                 break
 
-
+    current_val_str = str(current_value)
+    title = 'dropout_is_' + current_val_str
+    
     # Create the PDF file name based on a variable
     output_dir = "tmp_plots"
-    pdf_filename = os.path.join(output_dir, f"{current_gene_list}.pdf")
+    pdf_filename = os.path.join(output_dir, f"{title}.pdf")
     
     # Create the output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)  # Ensure the directory is created
@@ -347,7 +351,7 @@ def test_params(current_gene_list):
         fig, axs = plt.subplots(2, 2, figsize=(12, 10))  # 2 rows, 2 columns
     
         # Training accuracy plot
-        x_values = np.arange(1, len(train_accuracy_list) + 1)
+        x_values = np.arange(1, len(train_accuracy_list) + 1) * report_frequency
         frequency_counts = pd.Series(y_train_outcome).value_counts()
         train_chance_level = frequency_counts[0] / len(y_train_outcome)
     
@@ -404,5 +408,5 @@ def test_params(current_gene_list):
         pdf.savefig(fig)  # Save the figure to the PDF
         plt.close(fig)     # Close the figure
 
-for current_gene_list in gene_list_names:
-    test_params(current_gene_list)
+for current_value in dropout_rates:
+    test_params(current_value)
