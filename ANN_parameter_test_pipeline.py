@@ -336,7 +336,7 @@ def test_params(current_value):
                 break
 
     current_val_str = str(current_value)
-    title = 'dropout_is_' + current_val_str
+    title = current_gene_list + '_dropout_is_' + current_val_str
     
     # Create the PDF file name based on a variable
     output_dir = "tmp_plots"
