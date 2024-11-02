@@ -53,6 +53,9 @@ gene_list_names = gene_lists.keys()
 print('test')
 
 dropout_rates = [0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5]
+l2_reg_rates = [0.01,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5]
+holdout_rates = [0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.6,0.7]
+
 
 def test_params(current_value):
 
@@ -61,9 +64,9 @@ def test_params(current_value):
     epoch_count = 0
     pandas2ri.activate()
     test_set_size = 0.1
-    dropout_rate = current_value #0.1
+    dropout_rate = 0.2 #current_value #0.1
     balance = True
-    l2_reg = 0.1
+    l2_reg = 0.15 #0.1
     batch_size = 16  #determines how many samples are processed per batch, each epoch will process multiple batches
     learning_rate = 0.00001
     num_epochs = 3000
@@ -71,7 +74,7 @@ def test_params(current_value):
     accuracy_threshold = 0.95
     clipnorm = 2.0
     simplifly_categories = True
-    holdout_size = 0.5
+    holdout_size = current_value #0.5
     use_gene_list = True
     current_gene_list = 'de_intersect_plus_bulk_genes'
     PCA_reduce = False
@@ -336,7 +339,7 @@ def test_params(current_value):
                 break
 
     current_val_str = str(current_value)
-    title = current_gene_list + '_dropout_is_' + current_val_str
+    title = 'dipbg_' + 'holdout_rate_is_' + current_val_str
     
     # Create the PDF file name based on a variable
     output_dir = "tmp_plots"
@@ -408,5 +411,5 @@ def test_params(current_value):
         pdf.savefig(fig)  # Save the figure to the PDF
         plt.close(fig)     # Close the figure
 
-for current_value in dropout_rates:
+for current_value in holdout_rates:
     test_params(current_value)
