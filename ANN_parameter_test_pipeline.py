@@ -55,7 +55,9 @@ print('test')
 dropout_rates = [0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5]
 l2_reg_rates = [0.01,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5]
 holdout_rates = [0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.6,0.7]
-
+batch_sizes = [8,16,32,64,128,256]
+clip_norms = [1,2,3,4,5,6]
+current_value = [0]
 
 def test_params(current_value):
 
@@ -67,18 +69,18 @@ def test_params(current_value):
     dropout_rate = 0.2 #current_value #0.1
     balance = True
     l2_reg = 0.15 #0.1
-    batch_size = 16  #determines how many samples are processed per batch, each epoch will process multiple batches
-    learning_rate = 0.00001
-    num_epochs = 3000
+    batch_size = 16 #16  #determines how many samples are processed per batch, each epoch will process multiple batches
+    learning_rate = 0.000001
+    num_epochs = 3000 #3000
     report_frequency = 5
-    accuracy_threshold = 0.95
-    clipnorm = 2.0
+    accuracy_threshold = 0.90
+    clipnorm = current_value #2.0
     simplifly_categories = True
-    holdout_size = current_value #0.5
+    holdout_size = 0.45 #current_value #0.5
     use_gene_list = True
     current_gene_list = 'de_intersect_plus_bulk_genes'
     PCA_reduce = False
-    n_comp_PCA = 16
+    n_comp_PCA = 32
 
     # Load the RDS file
     rds_path = '/tmp/work/RCproject/gene_lists.rds'
@@ -339,7 +341,7 @@ def test_params(current_value):
                 break
 
     current_val_str = str(current_value)
-    title = 'dipbg_' + 'holdout_rate_is_' + current_val_str
+    title = 'dipbg_' + 'clipnorm_is_' + current_val_str
     
     # Create the PDF file name based on a variable
     output_dir = "tmp_plots"
@@ -411,5 +413,5 @@ def test_params(current_value):
         pdf.savefig(fig)  # Save the figure to the PDF
         plt.close(fig)     # Close the figure
 
-for current_value in holdout_rates:
+for current_value in clip_norms:
     test_params(current_value)
