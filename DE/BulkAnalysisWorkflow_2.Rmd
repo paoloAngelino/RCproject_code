@@ -167,7 +167,7 @@ table(sampleAnno$batch, sampleAnno$Platform)
 
 ```{r}
 # fix for some function calls
-assay(spe,2) <- assay(spe,1)
+assay(spe,2) <- assay(spe,1)f
 assay(spe,1) <- 2^assay(spe,1)
 assay(spe,3) <- scale(assay(spe,2))
 assayNames(spe) <- c("counts", "logcounts","scalelogcounts")
