@@ -6,6 +6,7 @@ import numpy as np
 import os
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
 
 # Enable pandas-to-R conversion
 pandas2ri.activate()
@@ -40,8 +41,8 @@ class RcDataPreparation:
         self.numerical_categories_technology = None
         self.numerical_categories_outcome = None
         self.unique_combinations_array = None
-        self.X_train = None
-        self.X_test = None
+        self.x_train = None
+        self.x_test = None
         self.y_train = None
         self.y_test = None
 
@@ -51,6 +52,8 @@ class RcDataPreparation:
         self.simplify_the_categories()
         self.encode_labels()
         self.add_meta_data()
+        self.retrieve_all_genes()
+        self.scale_data()
         self.establish_test_train()
 
     def retrieve_data(self):
@@ -136,11 +139,18 @@ class RcDataPreparation:
         self.metadata_df['numerical_categories_outcome'] = self.numerical_categories_outcome
         self.metadata_df['combination_tech_outcome'] = self.unique_combinations_array
 
+    def retrieve_all_genes(self):
+        self.genes_list = self.counts_df.index.to_list()
+
+    def scale_data(self):
+        scaler = MinMaxScaler()
+        self.counts_df = scaler.fit_transform(self.counts_df)
+
     def establish_test_train(self):
         """
         Splits the dataset into training and testing sets and exports training sample IDs.
         """
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
+        self.x_train, self.x_test, self.y_train, self.y_test = train_test_split(
             self.counts_df.T, self.metadata_df, 
             test_size=self.test_set_size, random_state=self.random_seed
         )
