@@ -144,14 +144,14 @@ class RcDataPreparation:
 
     def scale_data(self):
         scaler = MinMaxScaler()
-        self.counts_df = scaler.fit_transform(self.counts_df)
+        self.counts_df = scaler.fit_transform(self.counts_df.T)
 
     def establish_test_train(self):
         """
         Splits the dataset into training and testing sets and exports training sample IDs.
         """
         self.x_train, self.x_test, self.y_train, self.y_test = train_test_split(
-            self.counts_df.T, self.metadata_df, 
+            self.counts_df, self.metadata_df, 
             test_size=self.test_set_size, random_state=self.random_seed
         )
 
