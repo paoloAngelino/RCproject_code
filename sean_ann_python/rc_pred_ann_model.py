@@ -55,7 +55,7 @@ class PredAnnModel:
         balance=True,
         l2_reg=0.2,
         batch_size=16,
-        num_epochs=500,
+        num_epochs=5000,
         report_frequency=1,
         auc_threshold=0.9,
         clipnorm=2.0,
@@ -132,11 +132,17 @@ class PredAnnModel:
         self.train_the_model()
         
     def subset_input_data(self):
+        """
+        Subsets the data during training.
+        """
         gene_set_indices = [i for i, item in enumerate(self.input_data.genes_list) if item in self.current_genes]
         self.x_train = self.input_data.x_train[:, gene_set_indices]
         self.x_test = self.input_data.x_test[:, gene_set_indices]
 
-    def build_outcome_classifier(self):
+    def build_outcome_classifier(self
+        """
+        Establishes the model.
+        """
         self.outcome_classifier = keras.Sequential()
         self.outcome_classifier.add(layers.Input(shape=(len(self.current_genes),)))  # Input shape matches your data
         
@@ -168,6 +174,9 @@ class PredAnnModel:
         self.outcome_classifier.add(layers.Dense(1, activation='sigmoid'))
 
     def train_the_model(self):
+        """
+        Trains the model.
+        """
         
         # # set up the optimizer
         optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate, clipnorm = self.clipnorm)
