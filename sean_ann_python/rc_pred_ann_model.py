@@ -81,7 +81,7 @@ class PredAnnModel:
         Parameters:
         - current_genes (list): A non-empty list of genes to be used as model features.
         - learning_rate (float): intial learning rate of the model
-        - input_data (RcDataPreparation class object): data for training the model that has been appropriately formated.
+        - input_data (RcDataPreparation class object): data for training the model that has been appropriately formattedd.
         - dropout_rate (float): Dropout rate to prevent overfitting (default: 0.3).
         - balance (bool): Whether to balance technology and outcome variables during training (default: True).
         - l2_reg (float): Strength of L2 regularization (default: -0.2).
@@ -139,7 +139,7 @@ class PredAnnModel:
         self.x_train = self.input_data.x_train[:, gene_set_indices]
         self.x_test = self.input_data.x_test[:, gene_set_indices]
 
-    def build_outcome_classifier(self
+    def build_outcome_classifier(self):
         """
         Establishes the model.
         """

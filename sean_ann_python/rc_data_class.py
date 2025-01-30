@@ -11,7 +11,7 @@ from sklearn.preprocessing import MinMaxScaler
 # Enable pandas-to-R conversion
 pandas2ri.activate()
 
-class RcDataPreparation:
+class RcData:
     def __init__(
         self,
         data_dir='/tmp/work/RCproject/GEO_singlecellexperiment.rds',
