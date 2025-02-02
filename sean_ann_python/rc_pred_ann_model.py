@@ -135,7 +135,10 @@ class PredAnnModel:
         """
         Subsets the data during training.
         """
-        gene_set_indices = [i for i, item in enumerate(self.input_data.genes_list) if item in self.current_genes]
+        # prior retrival of gene set indices was too slow
+        # gene_set_indices = [i for i, item in enumerate(self.input_data.genes_list) if item in self.current_genes]
+        current_genes_set = set(self.current_genes)  # O(M)
+        gene_set_indices = [i for i, item in enumerate(self.input_data.genes_list) if item in current_genes_set]  # O(N)
         self.x_train = self.input_data.x_train[:, gene_set_indices]
         self.x_test = self.input_data.x_test[:, gene_set_indices]
 
