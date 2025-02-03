@@ -6,6 +6,13 @@ import math
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_curve, auc, roc_auc_score
 
+# should increase model efficiency
+# not cpu compatible, commented out for now
+
+# from tensorflow.keras import mixed_precision
+# policy = mixed_precision.Policy('mixed_float16')
+# mixed_precision.set_global_policy(policy)
+
 # Define the training step for only the outcome classifier
 def train_step(model, data, outcome_labels):
     with tf.GradientTape() as tape:
@@ -57,7 +64,7 @@ class PredAnnModel:
         batch_size=16,
         num_epochs=5000,
         report_frequency=1,
-        auc_threshold=0.9,
+        auc_threshold=0.999,
         clipnorm=2.0,
         simplify_categories=True,
         holdout_size=0.5,
