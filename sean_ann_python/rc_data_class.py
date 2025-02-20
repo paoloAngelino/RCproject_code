@@ -107,7 +107,7 @@ class RcData:
             category_map = {
                 'GSE133057': 'micro', 'GSE145037': 'micro', 'GSE150082': 'micro',
                 'GSE190826': 'seq', 'GSE209746': 'seq', 'GSE45404_GPL1': 'micro',
-                'GSE45404_GPL2': 'micro', 'GSE93375': 'micro', 'GSE94104': 'micro'
+                'GSE45404_GPL2': 'micro', 'GSE93375': 'micro', 'GSE94104': 'micro','eBio':'seq'
             }
             self.categories_technology = self.metadata_df['batch'].map(category_map)
         else:
